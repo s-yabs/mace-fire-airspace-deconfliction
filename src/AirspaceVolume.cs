@@ -21,10 +21,42 @@ internal sealed class AirspaceVolume
     public DateTime StartTime { get; set; }
     public DateTime NotBefore { get; set; }
     public bool IsExecuted { get; set; }
+    public bool HasTargetListed { get; set; }
+    public bool IsAimed { get; set; }
+    public bool IsTimedExecutionMission { get; set; }
+    public DateTime? ScheduledExecutionTime { get; set; }
     public double LowerAltitudeMsl_m { get; set; }
     public double UpperAltitudeMsl_m { get; set; }
     public double LateralBuffer_m { get; set; }
     public List<AirspaceConflict> Conflicts { get; } = new();
+
+    public Color GetDisplayColor(DateTime missionTime)
+    {
+        if (Conflicts.Count > 0 || IsExecuted)
+        {
+            return Color.Red;
+        }
+
+        if (IsTimedExecutionMission
+            && ScheduledExecutionTime.HasValue
+            && missionTime >= ScheduledExecutionTime.Value.AddSeconds(-60)
+            && missionTime <= ScheduledExecutionTime.Value.AddSeconds(60))
+        {
+            return Color.Red;
+        }
+
+        if (IsAimed)
+        {
+            return Color.Yellow;
+        }
+
+        if (HasTargetListed)
+        {
+            return Color.Green;
+        }
+
+        return Color.Orange;
+    }
 
     public IEnumerable<Shape> ToShapes()
     {

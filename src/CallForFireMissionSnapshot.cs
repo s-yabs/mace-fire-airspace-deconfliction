@@ -1,3 +1,6 @@
+using System;
+using System.Globalization;
+using System.Linq;
 using BSI.MACE;
 using BSI.MACE.CallForFire;
 
@@ -18,13 +21,25 @@ internal sealed class CallForFireMissionSnapshot
     public double GunTargetLine_deg { get; set; }
     public double MaxOrdinateMSL_m { get; set; }
     public double TimeOfFlight_s { get; set; }
+    public string TimeText { get; set; } = "";
+    public string MethodOfControlText { get; set; } = "";
+    public string SeadMissionTypeText { get; set; } = "";
     public string Status { get; set; } = "";
+    public DateTime? ScheduledExecutionTime { get; set; }
     public int CffFormNumber => DisplayIndex < 0 ? 0 : (DisplayIndex / 8) + 1;
     public int MissionNumber => DisplayIndex < 0 ? 0 : (DisplayIndex % 8) + 1;
     public string CffFormName => CffFormNumber > 0 && CffFormNumber <= 4 ? $"CFF Form {CffFormNumber}" : $"CFF Form ?";
     public string MissionName => MissionNumber > 0 ? $"Mission {MissionNumber}" : "Mission ?";
-    public bool ShouldDrawAimedOverlay => Status == "Aimed" || Status == "Executing";
+    public bool HasTargetListed => TargetPoint != null;
+    public bool ShouldDrawOverlay => HasTargetListed;
+    public bool IsAimed => Status == "Aimed" || Status == "Executing";
     public bool IsExecuting => Status == "Executing";
+    public bool IsTimedExecutionMission => ScheduledExecutionTime.HasValue
+        && (HasToken(MethodOfControlText, "TIMEONTARGET")
+            || HasToken(MethodOfControlText, "TOT")
+            || HasToken(MethodOfControlText, "FIREPLAN")
+            || HasToken(SeadMissionTypeText, "FIREPLAN")
+            || HasToken(SeadMissionTypeText, "TIMEONTARGET"));
     public bool IsTerminal => Status == "RoundsComplete" || Status == "EndMission" || Status == "NoSolution" || Status == "CheckFire";
     public bool IsPlaceholder =>
         RequestId <= 0
@@ -40,6 +55,7 @@ internal sealed class CallForFireMissionSnapshot
     public static CallForFireMissionSnapshot FromMission(
         ICallForFire.CallForFireEventArgs.CallForFireMission mission,
         IMap? map,
+        DateTime missionTime,
         int displayIndex)
     {
         IGeoPoint? targetPoint = null;
@@ -79,7 +95,60 @@ internal sealed class CallForFireMissionSnapshot
             GunTargetLine_deg = mission.GunTargetLine_deg,
             MaxOrdinateMSL_m = mission.MaxOrdinateMSL_m,
             TimeOfFlight_s = mission.TimeOfFlight_s,
+            TimeText = mission.Time ?? "",
+            MethodOfControlText = mission.MethodOfControl.ToString(),
+            SeadMissionTypeText = mission.SEADMissionType.ToString(),
+            ScheduledExecutionTime = ParseScheduledExecutionTime(mission.Time, missionTime),
             Status = mission.Status.ToString()
         };
+    }
+
+    private static DateTime? ParseScheduledExecutionTime(string? timeText, DateTime referenceMissionTime)
+    {
+        if (string.IsNullOrWhiteSpace(timeText))
+        {
+            return null;
+        }
+
+        if (TimeSpan.TryParse(timeText, CultureInfo.InvariantCulture, out var timeOfDay)
+            || TimeSpan.TryParse(timeText, out timeOfDay))
+        {
+            return AlignToMissionDay(referenceMissionTime, timeOfDay);
+        }
+
+        if (DateTime.TryParse(timeText, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedDateTime)
+            || DateTime.TryParse(timeText, out parsedDateTime))
+        {
+            return parsedDateTime;
+        }
+
+        return null;
+    }
+
+    private static DateTime AlignToMissionDay(DateTime referenceMissionTime, TimeSpan timeOfDay)
+    {
+        var candidate = referenceMissionTime.Date.Add(timeOfDay);
+        var delta = candidate - referenceMissionTime;
+        if (delta > TimeSpan.FromHours(12))
+        {
+            return candidate.AddDays(-1);
+        }
+
+        if (delta < TimeSpan.FromHours(-12))
+        {
+            return candidate.AddDays(1);
+        }
+
+        return candidate;
+    }
+
+    private static bool HasToken(string value, string token)
+    {
+        return Normalize(value).IndexOf(token, StringComparison.Ordinal) >= 0;
+    }
+
+    private static string Normalize(string value)
+    {
+        return new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
     }
 }

@@ -29,6 +29,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private readonly SeparationSettings _separationSettings = new();
     private readonly List<IMapPrimitive> _mapPrimitives = new();
     private readonly HashSet<Control> _hookedAimButtons = new();
+    private readonly HashSet<int> _manuallyAimedDisplayIndexes = new();
     private int _timerTicks;
     private int _nextMissionDisplayIndex;
     private int? _pendingAimDisplayIndex;
@@ -120,6 +121,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         _activeVolumes.Clear();
         _conflictHistory.Clear();
         _hookedAimButtons.Clear();
+        _manuallyAimedDisplayIndexes.Clear();
         _pendingAimDisplayIndex = null;
         ClearMapOverlay();
         LogInfo("Closed.");
@@ -145,13 +147,14 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             var displayIndex = _pendingAimDisplayIndex
                 ?? TryGetBackgroundMissionDisplayIndex(sender, args.Missions[i])
                 ?? (args.Missions.Count > 1 ? i : -1);
-            var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, displayIndex);
+            var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, _mission?.MissionTime ?? DateTime.Now, displayIndex);
             if (snapshot.IsPlaceholder)
             {
                 continue;
             }
 
             MergeMissionSnapshot(snapshot);
+            UpdateManualAimState(snapshot);
             _pendingAimDisplayIndex = null;
         }
 
@@ -397,6 +400,25 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         _missions.Add(snapshot);
     }
 
+    private void UpdateManualAimState(CallForFireMissionSnapshot snapshot)
+    {
+        if (snapshot.DisplayIndex < 0)
+        {
+            return;
+        }
+
+        if (snapshot.IsTerminal)
+        {
+            _manuallyAimedDisplayIndexes.Remove(snapshot.DisplayIndex);
+            return;
+        }
+
+        if (snapshot.IsAimed)
+        {
+            _manuallyAimedDisplayIndexes.Add(snapshot.DisplayIndex);
+        }
+    }
+
     private CallForFireMissionSnapshot? FindExistingMissionByContent(CallForFireMissionSnapshot snapshot)
     {
         return _missions
@@ -524,6 +546,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             _mission.MissionTime,
             DefaultPostFireBuffer,
             true);
+        ApplyMissionOverlayState(volume, snapshot);
 
         var existing = _activeVolumes.FirstOrDefault(v => v.SourceKey == volume.SourceKey);
         if (existing == null)
@@ -545,7 +568,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             existing.LowerAltitudeMsl_m = volume.LowerAltitudeMsl_m;
             existing.UpperAltitudeMsl_m = volume.UpperAltitudeMsl_m;
             existing.LateralBuffer_m = volume.LateralBuffer_m;
-            existing.IsExecuted = true;
+            existing.IsExecuted = volume.IsExecuted;
+            existing.HasTargetListed = volume.HasTargetListed;
+            existing.IsAimed = volume.IsAimed;
+            existing.IsTimedExecutionMission = volume.IsTimedExecutionMission;
+            existing.ScheduledExecutionTime = volume.ScheduledExecutionTime;
         }
 
         UpdateDeconfliction();
@@ -619,7 +646,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 continue;
             }
 
-            if (!mission.ShouldDrawAimedOverlay || mission.TargetPoint == null)
+            if (!mission.ShouldDrawOverlay || mission.TargetPoint == null)
             {
                 continue;
             }
@@ -637,6 +664,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 _mission.MissionTime,
                 TimeSpan.FromHours(6),
                 mission.IsExecuting);
+            ApplyMissionOverlayState(volume, mission);
 
             var existing = _activeVolumes.FirstOrDefault(v => v.SourceKey == sourceKey);
             if (existing == null)
@@ -659,6 +687,10 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             existing.UpperAltitudeMsl_m = volume.UpperAltitudeMsl_m;
             existing.LateralBuffer_m = volume.LateralBuffer_m;
             existing.IsExecuted = existing.IsExecuted || volume.IsExecuted;
+            existing.HasTargetListed = volume.HasTargetListed;
+            existing.IsAimed = volume.IsAimed;
+            existing.IsTimedExecutionMission = volume.IsTimedExecutionMission;
+            existing.ScheduledExecutionTime = volume.ScheduledExecutionTime;
         }
     }
 
@@ -692,6 +724,14 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             || string.Equals(entity.GetAggregate()?.Name, mission.BatteryName, StringComparison.OrdinalIgnoreCase));
     }
 
+    private void ApplyMissionOverlayState(AirspaceVolume volume, CallForFireMissionSnapshot? mission)
+    {
+        volume.HasTargetListed = mission?.HasTargetListed ?? false;
+        volume.IsAimed = mission != null && (mission.IsAimed || _manuallyAimedDisplayIndexes.Contains(mission.DisplayIndex));
+        volume.IsTimedExecutionMission = mission?.IsTimedExecutionMission ?? false;
+        volume.ScheduledExecutionTime = mission?.ScheduledExecutionTime;
+    }
+
     private void OnTimer(object? sender, EventArgs e)
     {
         if (_mission == null)
@@ -701,7 +741,6 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         _timerTicks++;
         HookCallForFireAimButtons();
-        var before = _activeVolumes.Count;
         var now = _mission.MissionTime;
         _activeVolumes.RemoveAll(v => v.NotBefore <= now);
 
@@ -710,10 +749,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             UpdateDeconfliction();
         }
 
-        if (_activeVolumes.Count != before)
-        {
-            UpdateMapOverlay();
-        }
+        UpdateMapOverlay();
 
         RefreshControl();
     }
@@ -745,12 +781,12 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return;
         }
 
-        button.MouseDown += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
-        button.Click += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
+        button.MouseDown += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex, buttonFieldName);
+        button.Click += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex, buttonFieldName);
         _hookedAimButtons.Add(button);
     }
 
-    private void CaptureAimDisplayIndex(Control missionControl, int fallbackMissionIndex)
+    private void CaptureAimDisplayIndex(Control missionControl, int fallbackMissionIndex, string buttonFieldName)
     {
         var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
         var formIndex = GetCallForFireFormIndex(parentForm);
@@ -761,7 +797,24 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return;
         }
 
-        _pendingAimDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
+        var displayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
+        _pendingAimDisplayIndex = displayIndex;
+
+        if (string.Equals(buttonFieldName, "btnAim", StringComparison.Ordinal))
+        {
+            _manuallyAimedDisplayIndexes.Add(displayIndex);
+            SynchronizeAimedOverlays();
+            UpdateMapOverlay();
+            RefreshControl();
+        }
+        else if (string.Equals(buttonFieldName, "btnCeaseFire", StringComparison.Ordinal)
+            || string.Equals(buttonFieldName, "btnEndOfMission", StringComparison.Ordinal))
+        {
+            _manuallyAimedDisplayIndexes.Remove(displayIndex);
+            SynchronizeAimedOverlays();
+            UpdateMapOverlay();
+            RefreshControl();
+        }
     }
 
     private int GetCallForFireFormIndex(object? parentForm)
@@ -971,7 +1024,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var signature = string.Join("|", _activeVolumes
             .OrderBy(v => v.SourceKey)
-            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}"));
+            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}:{GetOverlayColor(v, _mission.MissionTime).ToArgb()}:{(v.ScheduledExecutionTime?.Ticks ?? 0)}:{v.IsAimed}:{v.HasTargetListed}:{v.IsTimedExecutionMission}"));
         if (signature == _lastOverlaySignature)
         {
             return;
@@ -980,20 +1033,15 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         ClearMapOverlay();
         foreach (var volume in _activeVolumes)
         {
-            AddVolumeOverlay(volume, GetOverlayColor(volume));
+            AddVolumeOverlay(volume, GetOverlayColor(volume, _mission.MissionTime));
         }
 
         _lastOverlaySignature = signature;
     }
 
-    private static Color GetOverlayColor(AirspaceVolume volume)
+    private static Color GetOverlayColor(AirspaceVolume volume, DateTime missionTime)
     {
-        if (volume.Conflicts.Count > 0 || volume.IsExecuted)
-        {
-            return Color.Red;
-        }
-
-        return Color.Yellow;
+        return volume.GetDisplayColor(missionTime);
     }
 
     private void AddVolumeOverlay(AirspaceVolume volume, Color color)
