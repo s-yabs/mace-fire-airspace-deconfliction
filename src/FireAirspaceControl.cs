@@ -72,7 +72,7 @@ internal sealed class FireAirspaceControl : UserControl
         SetSettingValues(settings);
 
         _missionsGrid.DataSource = missions
-            .OrderBy(m => m.RequestId)
+            .OrderBy(m => m.DisplayIndex)
             .Select(m => new
             {
                 CFF = m.CffFormName,

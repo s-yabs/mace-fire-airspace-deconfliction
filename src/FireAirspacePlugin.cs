@@ -26,6 +26,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private readonly SeparationSettings _separationSettings = new();
     private readonly List<IMapPrimitive> _mapPrimitives = new();
     private int _timerTicks;
+    private int _nextMissionDisplayIndex;
     private string _lastOverlaySignature = "";
 
     public string Name => "Fire Airspace Deconfliction";
@@ -130,15 +131,45 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return;
         }
 
-        _missions.Clear();
         for (var i = 0; i < args.Missions.Count; i++)
         {
-            _missions.Add(CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, i));
+            MergeMissionSnapshot(CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, -1));
         }
 
         SynchronizeAimedOverlays();
         UpdateMapOverlay();
         RefreshControl();
+    }
+
+    private void MergeMissionSnapshot(CallForFireMissionSnapshot snapshot)
+    {
+        var key = GetMissionKey(snapshot);
+        var existing = _missions.FirstOrDefault(m => GetMissionKey(m) == key);
+        if (existing != null)
+        {
+            snapshot.DisplayIndex = existing.DisplayIndex;
+            var index = _missions.IndexOf(existing);
+            _missions[index] = snapshot;
+            return;
+        }
+
+        snapshot.DisplayIndex = _nextMissionDisplayIndex++;
+        _missions.Add(snapshot);
+    }
+
+    private static string GetMissionKey(CallForFireMissionSnapshot mission)
+    {
+        if (mission.RequestId > 0)
+        {
+            return $"request:{mission.RequestId}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(mission.TargetNumber))
+        {
+            return $"target:{mission.TargetNumber}";
+        }
+
+        return $"fallback:{mission.BatteryName}:{mission.TargetLocationText}:{mission.Round}:{mission.NumberOfRounds}";
     }
 
     private void OnWeaponFire(object? sender, EventArgs e)
