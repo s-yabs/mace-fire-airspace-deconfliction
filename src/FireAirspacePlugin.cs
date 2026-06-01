@@ -383,7 +383,8 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private void MergeMissionSnapshot(CallForFireMissionSnapshot snapshot)
     {
         var key = GetMissionKey(snapshot);
-        var existing = _missions.FirstOrDefault(m => GetMissionKey(m) == key);
+        var existing = _missions.FirstOrDefault(m => GetMissionKey(m) == key)
+            ?? FindExistingMissionByContent(snapshot);
         if (existing != null)
         {
             snapshot.DisplayIndex = existing.DisplayIndex;
@@ -394,6 +395,58 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         snapshot.DisplayIndex = AllocateDisplayIndex(snapshot);
         _missions.Add(snapshot);
+    }
+
+    private CallForFireMissionSnapshot? FindExistingMissionByContent(CallForFireMissionSnapshot snapshot)
+    {
+        return _missions
+            .Where(m => IsSameFireMission(m, snapshot))
+            .OrderByDescending(m => m.Status == "Aimed" || m.Status == "Executing")
+            .ThenByDescending(m => m.DisplayIndex)
+            .FirstOrDefault();
+    }
+
+    private static bool IsSameFireMission(CallForFireMissionSnapshot left, CallForFireMissionSnapshot right)
+    {
+        if (left.BatteryId != 0 && right.BatteryId != 0 && left.BatteryId != right.BatteryId)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(left.BatteryName)
+            && !string.IsNullOrWhiteSpace(right.BatteryName)
+            && !string.Equals(left.BatteryName, right.BatteryName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(left.TargetLocationText)
+            && !string.IsNullOrWhiteSpace(right.TargetLocationText)
+            && !string.Equals(left.TargetLocationText, right.TargetLocationText, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(left.TargetNumber)
+            && !string.IsNullOrWhiteSpace(right.TargetNumber)
+            && !string.Equals(left.TargetNumber, right.TargetNumber, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(left.Round)
+            && !string.IsNullOrWhiteSpace(right.Round)
+            && !string.Equals(left.Round, right.Round, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (left.NumberOfRounds > 0 && right.NumberOfRounds > 0 && left.NumberOfRounds != right.NumberOfRounds)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static string GetMissionKey(CallForFireMissionSnapshot mission)
@@ -676,17 +729,25 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             for (var missionIndex = 0; missionIndex < formControls.Count; missionIndex++)
             {
                 var missionControl = formControls[missionIndex];
-                var aimButton = GetReflectedMemberValue(missionControl, "btnAim") as Control;
-                if (aimButton == null || _hookedAimButtons.Contains(aimButton))
-                {
-                    continue;
-                }
-
-                aimButton.MouseDown += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
-                aimButton.Click += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
-                _hookedAimButtons.Add(aimButton);
+                HookMissionButton(missionControl, "btnAim", missionIndex);
+                HookMissionButton(missionControl, "btnFire", missionIndex);
+                HookMissionButton(missionControl, "btnCeaseFire", missionIndex);
+                HookMissionButton(missionControl, "btnEndOfMission", missionIndex);
             }
         }
+    }
+
+    private void HookMissionButton(Control missionControl, string buttonFieldName, int missionIndex)
+    {
+        var button = GetReflectedMemberValue(missionControl, buttonFieldName) as Control;
+        if (button == null || _hookedAimButtons.Contains(button))
+        {
+            return;
+        }
+
+        button.MouseDown += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
+        button.Click += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
+        _hookedAimButtons.Add(button);
     }
 
     private void CaptureAimDisplayIndex(Control missionControl, int fallbackMissionIndex)
