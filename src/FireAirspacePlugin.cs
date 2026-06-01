@@ -133,7 +133,8 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         for (var i = 0; i < args.Missions.Count; i++)
         {
-            var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, -1);
+            var displayIndex = args.Missions.Count > 1 ? i : -1;
+            var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, displayIndex);
             if (snapshot.IsPlaceholder)
             {
                 continue;
@@ -165,6 +166,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     private static string GetMissionKey(CallForFireMissionSnapshot mission)
     {
+        if (mission.DisplayIndex >= 0)
+        {
+            return $"slot:{mission.DisplayIndex}";
+        }
+
         if (mission.RequestId > 0 && !string.IsNullOrWhiteSpace(mission.TargetNumber))
         {
             return $"request-target:{mission.RequestId}:{mission.TargetNumber}";
@@ -180,6 +186,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     private int AllocateDisplayIndex(CallForFireMissionSnapshot snapshot)
     {
+        if (snapshot.DisplayIndex >= 0)
+        {
+            return snapshot.DisplayIndex;
+        }
+
         if (snapshot.RequestId >= 1 && snapshot.RequestId <= 4)
         {
             var formStart = (snapshot.RequestId - 1) * 8;
