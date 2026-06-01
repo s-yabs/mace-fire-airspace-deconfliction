@@ -20,6 +20,7 @@ internal sealed class AirspaceVolume
     public List<List<IGeoPoint>> FootprintPolygons { get; } = new();
     public DateTime StartTime { get; set; }
     public DateTime NotBefore { get; set; }
+    public bool IsExecuted { get; set; }
     public double LowerAltitudeMsl_m { get; set; }
     public double UpperAltitudeMsl_m { get; set; }
     public double LateralBuffer_m { get; set; }

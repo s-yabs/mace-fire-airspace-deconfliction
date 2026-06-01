@@ -136,6 +136,8 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             _missions.Add(CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, i));
         }
 
+        SynchronizeAimedOverlays();
+        UpdateMapOverlay();
         RefreshControl();
     }
 
@@ -160,7 +162,8 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             args.FiringEntity,
             target,
             _mission.MissionTime,
-            DefaultPostFireBuffer);
+            DefaultPostFireBuffer,
+            true);
 
         var existing = _activeVolumes.FirstOrDefault(v => v.SourceKey == volume.SourceKey);
         if (existing == null)
@@ -182,6 +185,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             existing.LowerAltitudeMsl_m = volume.LowerAltitudeMsl_m;
             existing.UpperAltitudeMsl_m = volume.UpperAltitudeMsl_m;
             existing.LateralBuffer_m = volume.LateralBuffer_m;
+            existing.IsExecuted = true;
         }
 
         UpdateDeconfliction();
@@ -234,6 +238,91 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             Severity = args.Message
         });
         RefreshControl();
+    }
+
+    private void SynchronizeAimedOverlays()
+    {
+        if (_mission == null)
+        {
+            return;
+        }
+
+        var currentMissionKeys = _missions.Select(m => $"cff:{m.RequestId}").ToHashSet();
+        _activeVolumes.RemoveAll(v => v.RequestId > 0 && !currentMissionKeys.Contains(v.SourceKey));
+
+        foreach (var mission in _missions)
+        {
+            var sourceKey = $"cff:{mission.RequestId}";
+            if (mission.IsTerminal)
+            {
+                _activeVolumes.RemoveAll(v => v.SourceKey == sourceKey);
+                continue;
+            }
+
+            if (!mission.ShouldDrawAimedOverlay || mission.TargetPoint == null)
+            {
+                continue;
+            }
+
+            var battery = FindBatteryEntity(mission);
+            if (battery == null)
+            {
+                continue;
+            }
+
+            var volume = AirspaceGeometry.BuildVolume(
+                mission,
+                battery,
+                mission.TargetPoint,
+                _mission.MissionTime,
+                TimeSpan.FromHours(6),
+                mission.IsExecuting);
+
+            var existing = _activeVolumes.FirstOrDefault(v => v.SourceKey == sourceKey);
+            if (existing == null)
+            {
+                _activeVolumes.Add(volume);
+                continue;
+            }
+
+            existing.NotBefore = volume.NotBefore;
+            existing.StartTime = volume.StartTime;
+            existing.FiringEntityId = volume.FiringEntityId;
+            existing.FiringEntityName = volume.FiringEntityName;
+            existing.GunPoint = volume.GunPoint;
+            existing.TargetPoint = volume.TargetPoint;
+            existing.Polygon.Clear();
+            existing.Polygon.AddRange(volume.Polygon);
+            existing.FootprintPolygons.Clear();
+            existing.FootprintPolygons.AddRange(volume.FootprintPolygons);
+            existing.LowerAltitudeMsl_m = volume.LowerAltitudeMsl_m;
+            existing.UpperAltitudeMsl_m = volume.UpperAltitudeMsl_m;
+            existing.LateralBuffer_m = volume.LateralBuffer_m;
+            existing.IsExecuted = existing.IsExecuted || volume.IsExecuted;
+        }
+    }
+
+    private IPhysicalEntity? FindBatteryEntity(CallForFireMissionSnapshot mission)
+    {
+        if (_mission == null)
+        {
+            return null;
+        }
+
+        if (mission.BatteryId != 0 && _mission.PhysicalEntities.TryGetValue(mission.BatteryId, out var directBattery))
+        {
+            return directBattery;
+        }
+
+        if (mission.BatteryAggregateId != 0 && _mission.AggregateEntities.TryGetValue(mission.BatteryAggregateId, out var aggregate))
+        {
+            return aggregate.PrimaryPhysicalEntity ?? aggregate.PhysicalEntities.Values.FirstOrDefault();
+        }
+
+        return _mission.PhysicalEntities.Values.FirstOrDefault(entity =>
+            string.Equals(entity.Name, mission.BatteryName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entity.Label, mission.BatteryName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entity.GetAggregate()?.Name, mission.BatteryName, StringComparison.OrdinalIgnoreCase));
     }
 
     private void OnTimer(object? sender, EventArgs e)
@@ -341,7 +430,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var signature = string.Join("|", _activeVolumes
             .OrderBy(v => v.SourceKey)
-            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}"));
+            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}"));
         if (signature == _lastOverlaySignature)
         {
             return;
@@ -350,10 +439,20 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         ClearMapOverlay();
         foreach (var volume in _activeVolumes)
         {
-            AddVolumeOverlay(volume, volume.Conflicts.Count > 0 ? Color.Red : Color.Orange);
+            AddVolumeOverlay(volume, GetOverlayColor(volume));
         }
 
         _lastOverlaySignature = signature;
+    }
+
+    private static Color GetOverlayColor(AirspaceVolume volume)
+    {
+        if (volume.Conflicts.Count > 0 || volume.IsExecuted)
+        {
+            return Color.Red;
+        }
+
+        return Color.Yellow;
     }
 
     private void AddVolumeOverlay(AirspaceVolume volume, Color color)

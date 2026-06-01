@@ -16,7 +16,8 @@ internal static class AirspaceGeometry
         IPhysicalEntity firingEntity,
         IGeoPoint target,
         DateTime missionTime,
-        TimeSpan postFireBuffer)
+        TimeSpan postFireBuffer,
+        bool isExecuted)
     {
         var gunPoint = firingEntity.Position.Clone();
         var targetPoint = target.Clone();
@@ -54,6 +55,7 @@ internal static class AirspaceGeometry
             TargetPoint = targetPoint,
             StartTime = missionTime,
             NotBefore = missionTime.AddSeconds(tof).Add(postFireBuffer),
+            IsExecuted = isExecuted,
             LowerAltitudeMsl_m = Math.Min(gunPoint.AltitudeMSL_meters, targetPoint.AltitudeMSL_meters),
             UpperAltitudeMsl_m = upper,
             LateralBuffer_m = width

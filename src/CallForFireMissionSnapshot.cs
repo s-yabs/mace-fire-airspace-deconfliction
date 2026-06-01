@@ -23,6 +23,9 @@ internal sealed class CallForFireMissionSnapshot
     public int MissionNumber => DisplayIndex < 0 ? 0 : (DisplayIndex % 8) + 1;
     public string CffFormName => CffFormNumber > 0 && CffFormNumber <= 4 ? $"CFF Form {CffFormNumber}" : $"CFF Form ?";
     public string MissionName => MissionNumber > 0 ? $"Mission {MissionNumber}" : "Mission ?";
+    public bool ShouldDrawAimedOverlay => Status == "Aimed" || Status == "Executing";
+    public bool IsExecuting => Status == "Executing";
+    public bool IsTerminal => Status == "RoundsComplete" || Status == "EndMission" || Status == "NoSolution" || Status == "CheckFire";
 
     public static CallForFireMissionSnapshot FromMission(
         ICallForFire.CallForFireEventArgs.CallForFireMission mission,
