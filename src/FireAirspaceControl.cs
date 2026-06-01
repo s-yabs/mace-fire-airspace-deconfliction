@@ -91,6 +91,7 @@ internal sealed class FireAirspaceControl : UserControl
             .ToList();
 
         _activeGrid.DataSource = activeVolumes
+            .Where(v => v.IsExecuted)
             .OrderBy(v => v.DisplayName)
             .Select(v => new
             {
