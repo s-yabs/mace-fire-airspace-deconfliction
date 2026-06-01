@@ -133,7 +133,13 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         for (var i = 0; i < args.Missions.Count; i++)
         {
-            MergeMissionSnapshot(CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, -1));
+            var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, -1);
+            if (snapshot.IsPlaceholder)
+            {
+                continue;
+            }
+
+            MergeMissionSnapshot(snapshot);
         }
 
         SynchronizeAimedOverlays();
@@ -153,15 +159,15 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return;
         }
 
-        snapshot.DisplayIndex = _nextMissionDisplayIndex++;
+        snapshot.DisplayIndex = AllocateDisplayIndex(snapshot);
         _missions.Add(snapshot);
     }
 
     private static string GetMissionKey(CallForFireMissionSnapshot mission)
     {
-        if (mission.RequestId > 0)
+        if (mission.RequestId > 0 && !string.IsNullOrWhiteSpace(mission.TargetNumber))
         {
-            return $"request:{mission.RequestId}";
+            return $"request-target:{mission.RequestId}:{mission.TargetNumber}";
         }
 
         if (!string.IsNullOrWhiteSpace(mission.TargetNumber))
@@ -169,7 +175,34 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return $"target:{mission.TargetNumber}";
         }
 
-        return $"fallback:{mission.BatteryName}:{mission.TargetLocationText}:{mission.Round}:{mission.NumberOfRounds}";
+        return $"fallback:{mission.RequestId}:{mission.BatteryId}:{mission.BatteryName}:{mission.TargetLocationText}:{mission.Round}:{mission.NumberOfRounds}";
+    }
+
+    private int AllocateDisplayIndex(CallForFireMissionSnapshot snapshot)
+    {
+        if (snapshot.RequestId >= 1 && snapshot.RequestId <= 4)
+        {
+            var formStart = (snapshot.RequestId - 1) * 8;
+            var usedMissionSlots = _missions
+                .Where(m => m.DisplayIndex >= formStart && m.DisplayIndex < formStart + 8)
+                .Select(m => m.DisplayIndex - formStart)
+                .ToHashSet();
+
+            for (var missionSlot = 0; missionSlot < 8; missionSlot++)
+            {
+                if (!usedMissionSlots.Contains(missionSlot))
+                {
+                    return formStart + missionSlot;
+                }
+            }
+        }
+
+        while (_missions.Any(m => m.DisplayIndex == _nextMissionDisplayIndex))
+        {
+            _nextMissionDisplayIndex++;
+        }
+
+        return _nextMissionDisplayIndex++;
     }
 
     private void OnWeaponFire(object? sender, EventArgs e)

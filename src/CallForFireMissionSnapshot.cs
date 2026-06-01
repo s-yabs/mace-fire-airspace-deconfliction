@@ -26,6 +26,16 @@ internal sealed class CallForFireMissionSnapshot
     public bool ShouldDrawAimedOverlay => Status == "Aimed" || Status == "Executing";
     public bool IsExecuting => Status == "Executing";
     public bool IsTerminal => Status == "RoundsComplete" || Status == "EndMission" || Status == "NoSolution" || Status == "CheckFire";
+    public bool IsPlaceholder =>
+        RequestId <= 0
+        && BatteryId == 0
+        && string.IsNullOrWhiteSpace(BatteryName)
+        && string.IsNullOrWhiteSpace(TargetNumber)
+        && string.IsNullOrWhiteSpace(TargetLocationText)
+        && string.IsNullOrWhiteSpace(Round)
+        && NumberOfRounds <= 0
+        && MaxOrdinateMSL_m <= 0
+        && TimeOfFlight_s <= 0;
 
     public static CallForFireMissionSnapshot FromMission(
         ICallForFire.CallForFireEventArgs.CallForFireMission mission,
