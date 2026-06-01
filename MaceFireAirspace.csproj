@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net481</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MaceFireAirspace</AssemblyName>
+    <RootNamespace>MaceFireAirspace</RootNamespace>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BSILib">
+      <HintPath>C:\Program Files\Battlespace Simulations\MACE\BSILib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SimulationLibrary">
+      <HintPath>C:\Program Files\Battlespace Simulations\MACE\SimulationLibrary.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SignalGenerator">
+      <HintPath>C:\Program Files\Battlespace Simulations\MACE\SignalGenerator.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+</Project>
