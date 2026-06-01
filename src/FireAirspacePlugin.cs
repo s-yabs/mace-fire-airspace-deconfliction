@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Collections;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Windows.Forms;
 using BSI.MACE;
 using BSI.MACE.CallForFire;
@@ -25,8 +28,10 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private readonly List<ConflictRecord> _conflictHistory = new();
     private readonly SeparationSettings _separationSettings = new();
     private readonly List<IMapPrimitive> _mapPrimitives = new();
+    private readonly HashSet<Control> _hookedAimButtons = new();
     private int _timerTicks;
     private int _nextMissionDisplayIndex;
+    private int? _pendingAimDisplayIndex;
     private string _lastOverlaySignature = "";
 
     public string Name => "Fire Airspace Deconfliction";
@@ -114,6 +119,8 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         _control = null;
         _activeVolumes.Clear();
         _conflictHistory.Clear();
+        _hookedAimButtons.Clear();
+        _pendingAimDisplayIndex = null;
         ClearMapOverlay();
         LogInfo("Closed.");
     }
@@ -131,9 +138,13 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return;
         }
 
+        LogCallForFireDiagnostics(sender, args);
+
         for (var i = 0; i < args.Missions.Count; i++)
         {
-            var displayIndex = args.Missions.Count > 1 ? i : -1;
+            var displayIndex = _pendingAimDisplayIndex
+                ?? TryGetBackgroundMissionDisplayIndex(sender, args.Missions[i])
+                ?? (args.Missions.Count > 1 ? i : -1);
             var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, displayIndex);
             if (snapshot.IsPlaceholder)
             {
@@ -141,11 +152,232 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             }
 
             MergeMissionSnapshot(snapshot);
+            _pendingAimDisplayIndex = null;
         }
 
         SynchronizeAimedOverlays();
         UpdateMapOverlay();
         RefreshControl();
+    }
+
+    private void LogCallForFireDiagnostics(object? sender, ICallForFire.CallForFireEventArgs args)
+    {
+        try
+        {
+            var outputPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+                "MACE",
+                "output",
+                "MaceFireAirspace-cff-debug.log");
+
+            var text = new StringBuilder();
+            text.AppendLine($"[{DateTime.Now:O}] CFF event: sender={sender?.GetType().FullName ?? "<null>"}, missions={args.Missions.Count}");
+            text.AppendLine($"Sender detail: {DescribeObject(sender)}");
+            text.Append(DescribeBackgroundMissions(sender));
+            for (var i = 0; i < args.Missions.Count; i++)
+            {
+                var mission = args.Missions[i];
+                text.AppendLine(
+                    $"  index={i}, displayIndex={TryGetBackgroundMissionDisplayIndex(sender, mission)?.ToString() ?? ""}, requestId={mission.RequestID}, status={mission.Status}, targetNumber={mission.TargetNumber ?? ""}, targetLocation={mission.TargetLocation ?? ""}, batteryId={mission.Battery?.ID ?? 0}, battery={mission.Battery?.Name ?? ""}, batteryLabel={mission.Battery?.Label ?? ""}, round={mission.Round ?? ""}, rounds={mission.NumberOfRounds}, maxOrdMslM={mission.MaxOrdinateMSL_m:0.###}, tofS={mission.TimeOfFlight_s:0.###}, gtlDeg={mission.GunTargetLine_deg:0.###}, time={mission.Time ?? ""}, method={mission.MethodOfControl}, sead={mission.SEADMissionType}");
+            }
+
+            File.AppendAllText(outputPath, text.ToString());
+        }
+        catch
+        {
+            // Diagnostics should never interrupt MACE event handling.
+        }
+    }
+
+    private static int? TryGetBackgroundMissionDisplayIndex(
+        object? sender,
+        ICallForFire.CallForFireEventArgs.CallForFireMission mission)
+    {
+        if (TryGetBackgroundMissionList(sender) is not { } missions)
+        {
+            return null;
+        }
+
+        var bestIndex = -1;
+        var bestScore = 0;
+        for (var i = 0; i < missions.Count; i++)
+        {
+            var candidate = missions[i];
+            var score = ScoreBackgroundMission(candidate, mission);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+
+        return bestScore >= 3 ? bestIndex : null;
+    }
+
+    private static int ScoreBackgroundMission(object? candidate, ICallForFire.CallForFireEventArgs.CallForFireMission mission)
+    {
+        if (candidate == null)
+        {
+            return 0;
+        }
+
+        var score = 0;
+        score += ScoreString(candidate, mission.TargetNumber, "TargetNumber", "Target", "targetNumber");
+        score += ScoreString(candidate, mission.TargetLocation, "TargetLocation", "targetLocation");
+        score += ScoreString(candidate, mission.Round, "Round", "round");
+        score += ScoreString(candidate, mission.Status.ToString(), "Status", "status", "SolutionStatus");
+
+        var batteryName = mission.Battery?.Name;
+        if (!string.IsNullOrWhiteSpace(batteryName) && DescribeObject(candidate).IndexOf(batteryName, StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            score++;
+        }
+
+        if (mission.NumberOfRounds > 0 && DescribeObject(candidate).IndexOf(mission.NumberOfRounds.ToString(), StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            score++;
+        }
+
+        return score;
+    }
+
+    private static int ScoreString(object candidate, string? expected, params string[] memberNames)
+    {
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return 0;
+        }
+
+        foreach (var memberName in memberNames)
+        {
+            var value = GetReflectedMemberValue(candidate, memberName)?.ToString();
+            if (string.Equals(value, expected, StringComparison.OrdinalIgnoreCase))
+            {
+                return 2;
+            }
+        }
+
+        return DescribeObject(candidate).IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0 ? 1 : 0;
+    }
+
+    private static List<object?>? TryGetBackgroundMissionList(object? sender)
+    {
+        var value = sender == null ? null : GetReflectedMemberValue(sender, "backgroundCallForFireMissions");
+        if (value is not IEnumerable enumerable || value is string)
+        {
+            return null;
+        }
+
+        return enumerable.Cast<object?>().ToList();
+    }
+
+    private static string DescribeBackgroundMissions(object? sender)
+    {
+        var missions = TryGetBackgroundMissionList(sender);
+        if (missions == null)
+        {
+            return "";
+        }
+
+        var text = new StringBuilder();
+        text.AppendLine($"Background missions: count={missions.Count}");
+        for (var i = 0; i < missions.Count; i++)
+        {
+            text.AppendLine($"  background[{i}] type={missions[i]?.GetType().FullName ?? "<null>"} {DescribeObject(missions[i], true)}");
+        }
+
+        return text.ToString();
+    }
+
+    private static string DescribeObject(object? value, bool includeNonPublic = false)
+    {
+        if (value == null)
+        {
+            return "<null>";
+        }
+
+        try
+        {
+            var type = value.GetType();
+            var flags = BindingFlags.Instance | BindingFlags.Public;
+            if (includeNonPublic)
+            {
+                flags |= BindingFlags.NonPublic;
+            }
+
+            var details = new List<string>();
+            details.AddRange(type
+                .GetProperties(flags)
+                .Where(p => p.GetIndexParameters().Length == 0)
+                .Take(40)
+                .Select(p => $"{p.Name}={SafeGetValue(p, value)}"));
+            details.AddRange(type
+                .GetFields(flags)
+                .Take(40)
+                .Select(f => $"{f.Name}={SafeGetValue(f, value)}"));
+            return string.Join(", ", details);
+        }
+        catch
+        {
+            return "<unavailable>";
+        }
+    }
+
+    private static object? GetReflectedMemberValue(object target, string memberName)
+    {
+        var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
+        var type = target.GetType();
+        var property = type.GetProperty(memberName, flags);
+        if (property != null && property.GetIndexParameters().Length == 0)
+        {
+            try
+            {
+                return property.GetValue(target);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        var field = type.GetField(memberName, flags);
+        if (field != null)
+        {
+            try
+            {
+                return field.GetValue(target);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static string SafeGetValue(PropertyInfo property, object target)
+    {
+        try
+        {
+            return property.GetValue(target)?.ToString() ?? "";
+        }
+        catch
+        {
+            return "<error>";
+        }
+    }
+
+    private static string SafeGetValue(FieldInfo field, object target)
+    {
+        try
+        {
+            return field.GetValue(target)?.ToString() ?? "";
+        }
+        catch
+        {
+            return "<error>";
+        }
     }
 
     private void MergeMissionSnapshot(CallForFireMissionSnapshot snapshot)
@@ -278,7 +510,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var now = _mission.MissionTime;
         var snapshot = FindMatchingMission(args.FiringEntity, args.DetonationLocation);
-        var sourceKey = snapshot != null ? $"cff:{snapshot.RequestId}" : "";
+        var sourceKey = snapshot != null ? GetMissionSourceKey(snapshot) : "";
         foreach (var volume in _activeVolumes.Where(v => v.FiringEntityId == args.FiringEntity.ID || v.SourceKey == sourceKey))
         {
             var tof = args.TimeOfFlight_s > 0 ? TimeSpan.FromSeconds(args.TimeOfFlight_s) : TimeSpan.Zero;
@@ -322,12 +554,12 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return;
         }
 
-        var currentMissionKeys = _missions.Select(m => $"cff:{m.RequestId}").ToHashSet();
-        _activeVolumes.RemoveAll(v => v.RequestId > 0 && !currentMissionKeys.Contains(v.SourceKey));
+        var currentMissionKeys = _missions.Select(GetMissionSourceKey).ToHashSet();
+        _activeVolumes.RemoveAll(v => v.SourceKey.StartsWith("cff-slot:", StringComparison.Ordinal) && !currentMissionKeys.Contains(v.SourceKey));
 
         foreach (var mission in _missions)
         {
-            var sourceKey = $"cff:{mission.RequestId}";
+            var sourceKey = GetMissionSourceKey(mission);
             if (mission.IsTerminal)
             {
                 _activeVolumes.RemoveAll(v => v.SourceKey == sourceKey);
@@ -377,6 +609,13 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         }
     }
 
+    private static string GetMissionSourceKey(CallForFireMissionSnapshot mission)
+    {
+        return mission.DisplayIndex >= 0
+            ? $"cff-slot:{mission.DisplayIndex}"
+            : $"cff-request:{mission.RequestId}:{mission.TargetNumber}:{mission.BatteryId}:{mission.TargetLocationText}";
+    }
+
     private IPhysicalEntity? FindBatteryEntity(CallForFireMissionSnapshot mission)
     {
         if (_mission == null)
@@ -408,6 +647,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         }
 
         _timerTicks++;
+        HookCallForFireAimButtons();
         var before = _activeVolumes.Count;
         var now = _mission.MissionTime;
         _activeVolumes.RemoveAll(v => v.NotBefore <= now);
@@ -423,6 +663,171 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         }
 
         RefreshControl();
+    }
+
+    private void HookCallForFireAimButtons()
+    {
+        foreach (Form form in Application.OpenForms)
+        {
+            var formControls = EnumerateControls(form)
+                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
+                .ToList();
+
+            for (var missionIndex = 0; missionIndex < formControls.Count; missionIndex++)
+            {
+                var missionControl = formControls[missionIndex];
+                var aimButton = GetReflectedMemberValue(missionControl, "btnAim") as Control;
+                if (aimButton == null || _hookedAimButtons.Contains(aimButton))
+                {
+                    continue;
+                }
+
+                aimButton.MouseDown += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
+                aimButton.Click += (_, _) => CaptureAimDisplayIndex(missionControl, missionIndex);
+                _hookedAimButtons.Add(aimButton);
+            }
+        }
+    }
+
+    private void CaptureAimDisplayIndex(Control missionControl, int fallbackMissionIndex)
+    {
+        var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+        var formIndex = GetCallForFireFormIndex(parentForm);
+        var missionIndex = GetSelectedMissionTabIndex(parentForm)
+            ?? GetMissionIndexWithinForm(missionControl, parentForm, fallbackMissionIndex);
+        if (formIndex < 0 || missionIndex < 0)
+        {
+            return;
+        }
+
+        _pendingAimDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
+    }
+
+    private int GetCallForFireFormIndex(object? parentForm)
+    {
+        if (parentForm == null)
+        {
+            return -1;
+        }
+
+        var backgroundMissions = TryGetBackgroundMissionList(_mission?.CallForFire);
+        if (backgroundMissions != null)
+        {
+            for (var i = 0; i < backgroundMissions.Count; i++)
+            {
+                var hostForm = GetReflectedMemberValue(backgroundMissions[i]!, "hostCallForFireForm");
+                if (ReferenceEquals(hostForm, parentForm))
+                {
+                    return i;
+                }
+            }
+        }
+
+        var cffForms = Application.OpenForms
+            .Cast<Form>()
+            .Where(f => f.GetType().FullName == "RW_ACE.FormCallForFire")
+            .ToList();
+        for (var i = 0; i < cffForms.Count; i++)
+        {
+            if (ReferenceEquals(cffForms[i], parentForm))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int? GetSelectedMissionTabIndex(object? parentForm)
+    {
+        if (parentForm == null)
+        {
+            return null;
+        }
+
+        var tabControl = GetReflectedMemberValue(parentForm, "tabControl")
+            ?? GetReflectedMemberValue(parentForm, "_tabControl");
+        if (tabControl == null)
+        {
+            return null;
+        }
+
+        foreach (var memberName in new[] { "SelectedTabIndex", "SelectedIndex" })
+        {
+            var value = GetReflectedMemberValue(tabControl, memberName);
+            if (TryConvertToInt(value, out var index) && index >= 0)
+            {
+                return index;
+            }
+        }
+
+        var selectedTab = GetReflectedMemberValue(tabControl, "SelectedTab");
+        var tabs = GetReflectedMemberValue(tabControl, "Tabs") as IEnumerable;
+        if (selectedTab != null && tabs != null)
+        {
+            var index = 0;
+            foreach (var tab in tabs)
+            {
+                if (ReferenceEquals(tab, selectedTab))
+                {
+                    return index;
+                }
+
+                index++;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryConvertToInt(object? value, out int result)
+    {
+        switch (value)
+        {
+            case int intValue:
+                result = intValue;
+                return true;
+            case short shortValue:
+                result = shortValue;
+                return true;
+            case long longValue when longValue >= int.MinValue && longValue <= int.MaxValue:
+                result = (int)longValue;
+                return true;
+            default:
+                result = 0;
+                return false;
+        }
+    }
+
+    private static int GetMissionIndexWithinForm(Control missionControl, object? parentForm, int fallbackMissionIndex)
+    {
+        if (parentForm is Control formControl)
+        {
+            var controls = EnumerateControls(formControl)
+                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
+                .ToList();
+            for (var i = 0; i < controls.Count; i++)
+            {
+                if (ReferenceEquals(controls[i], missionControl))
+                {
+                    return Math.Max(0, controls.Count - 1 - i);
+                }
+            }
+        }
+
+        return fallbackMissionIndex;
+    }
+
+    private static IEnumerable<Control> EnumerateControls(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            yield return child;
+            foreach (var descendant in EnumerateControls(child))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private CallForFireMissionSnapshot? FindMatchingMission(IPhysicalEntity firingEntity, IGeoPoint? target)

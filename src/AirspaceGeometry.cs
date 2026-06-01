@@ -39,12 +39,15 @@ internal static class AirspaceGeometry
             Move(gunPoint, rightBearing, width)
         };
 
-        var request = mission?.RequestId.ToString() ?? "Unmatched";
         var formName = mission?.CffFormName ?? "Unmatched CFF";
         var missionName = mission?.MissionName ?? "Unmatched Mission";
         var volume = new AirspaceVolume
         {
-            SourceKey = mission != null ? $"cff:{mission.RequestId}" : $"gun:{firingEntity.ID}:{targetPoint.GeohashAsString}",
+            SourceKey = mission == null
+                ? $"gun:{firingEntity.ID}:{targetPoint.GeohashAsString}"
+                : mission.DisplayIndex >= 0
+                    ? $"cff-slot:{mission.DisplayIndex}"
+                    : $"cff-request:{mission.RequestId}:{mission.TargetNumber}:{mission.BatteryId}:{mission.TargetLocationText}",
             DisplayName = $"{formName} / {missionName}",
             RequestId = mission?.RequestId ?? 0,
             CffFormName = formName,
