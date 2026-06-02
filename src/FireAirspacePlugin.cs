@@ -531,7 +531,12 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         }
 
         var snapshot = FindMatchingMission(args.FiringEntity, args.TargetLocation);
-        var target = snapshot?.TargetPoint ?? args.TargetLocation ?? args.TargetEntity?.Position;
+        if (snapshot == null)
+        {
+            return;
+        }
+
+        var target = snapshot.TargetPoint ?? args.TargetLocation ?? args.TargetEntity?.Position;
 
         if (target == null)
         {
