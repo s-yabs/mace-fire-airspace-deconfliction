@@ -76,6 +76,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             {
                 _separationSettings.Horizontal_nm = settings.Horizontal_nm;
                 _separationSettings.Vertical_ft = settings.Vertical_ft;
+                _separationSettings.PreFireActivationSeconds = settings.PreFireActivationSeconds;
                 UpdateDeconfliction();
                 UpdateMapOverlay();
                 RefreshControl();
@@ -145,7 +146,6 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         for (var i = 0; i < args.Missions.Count; i++)
         {
             var displayIndex = _pendingAimDisplayIndex
-                ?? TryGetBackgroundMissionDisplayIndex(sender, args.Missions[i])
                 ?? (args.Missions.Count > 1 ? i : -1);
             var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, _mission?.MissionTime ?? DateTime.Now, displayIndex);
             if (snapshot.IsPlaceholder)
@@ -481,11 +481,6 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         if (mission.RequestId > 0 && !string.IsNullOrWhiteSpace(mission.TargetNumber))
         {
             return $"request-target:{mission.RequestId}:{mission.TargetNumber}";
-        }
-
-        if (!string.IsNullOrWhiteSpace(mission.TargetNumber))
-        {
-            return $"target:{mission.TargetNumber}";
         }
 
         return $"fallback:{mission.RequestId}:{mission.BatteryId}:{mission.BatteryName}:{mission.TargetLocationText}:{mission.Round}:{mission.NumberOfRounds}";
@@ -1029,7 +1024,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var signature = string.Join("|", _activeVolumes
             .OrderBy(v => v.SourceKey)
-            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}:{GetOverlayColor(v, _mission.MissionTime).ToArgb()}:{(v.ScheduledExecutionTime?.Ticks ?? 0)}:{v.IsAimed}:{v.HasTargetListed}:{v.IsTimedExecutionMission}"));
+            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}:{GetOverlayColor(v, _mission.MissionTime).ToArgb()}:{(v.ScheduledExecutionTime?.Ticks ?? 0)}:{v.IsAimed}:{v.HasTargetListed}:{v.IsTimedExecutionMission}:{_separationSettings.PreFireActivationSeconds:0}"));
         if (signature == _lastOverlaySignature)
         {
             return;
@@ -1044,9 +1039,9 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         _lastOverlaySignature = signature;
     }
 
-    private static Color GetOverlayColor(AirspaceVolume volume, DateTime missionTime)
+    private Color GetOverlayColor(AirspaceVolume volume, DateTime missionTime)
     {
-        return volume.GetDisplayColor(missionTime);
+        return volume.GetDisplayColor(missionTime, _separationSettings.PreFireActivationSeconds);
     }
 
     private void AddVolumeOverlay(AirspaceVolume volume, Color color)

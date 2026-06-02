@@ -42,6 +42,7 @@ internal sealed class SeparationSettings
 {
     public double Horizontal_nm { get; set; } = 1.0;
     public double Vertical_ft { get; set; } = 1000;
+    public double PreFireActivationSeconds { get; set; } = 60;
     public double Horizontal_m => Horizontal_nm * 1852.0;
 }
 

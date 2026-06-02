@@ -14,6 +14,7 @@ internal sealed class FireAirspaceControl : UserControl
     private readonly Button _refreshButton = new();
     private readonly NumericUpDown _horizontalNm = new();
     private readonly NumericUpDown _verticalFt = new();
+    private readonly NumericUpDown _preFireSeconds = new();
 
     public event EventHandler? RefreshRequested;
     public event EventHandler<SeparationSettings>? SettingsChanged;
@@ -42,6 +43,13 @@ internal sealed class FireAirspaceControl : UserControl
         _verticalFt.Value = 1000;
         _verticalFt.ValueChanged += (_, _) => RaiseSettingsChanged();
 
+        _preFireSeconds.Minimum = 0;
+        _preFireSeconds.Maximum = 3600;
+        _preFireSeconds.Increment = 5;
+        _preFireSeconds.Width = 80;
+        _preFireSeconds.Value = 60;
+        _preFireSeconds.ValueChanged += (_, _) => RaiseSettingsChanged();
+
         var header = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -50,6 +58,8 @@ internal sealed class FireAirspaceControl : UserControl
             Padding = new Padding(8)
         };
         header.Controls.Add(_refreshButton);
+        header.Controls.Add(_preFireSeconds);
+        header.Controls.Add(new Label { Text = "Pre-fire sec", AutoSize = true, Padding = new Padding(8, 6, 0, 0) });
         header.Controls.Add(_verticalFt);
         header.Controls.Add(new Label { Text = "Vertical ft", AutoSize = true, Padding = new Padding(8, 6, 0, 0) });
         header.Controls.Add(_horizontalNm);
@@ -98,8 +108,8 @@ internal sealed class FireAirspaceControl : UserControl
                 CFF = v.CffFormName,
                 Mission = v.MissionName,
                 Battery = v.FiringEntityName,
-                Start = v.StartTime.ToLongTimeString(),
-                NotBefore = v.NotBefore.ToLongTimeString(),
+                Start = FormatTime(v.StartTime),
+                NotBefore = FormatTime(v.NotBefore),
                 MaxOrdMSL_m = $"{v.UpperAltitudeMsl_m:0}",
                 MaxOrdMSL_ft = $"{v.UpperAltitudeMsl_m * 3.280839895:0}",
                 GTLBuffer_ft = $"{v.LateralBuffer_m * 3.280839895:0}",
@@ -113,8 +123,8 @@ internal sealed class FireAirspaceControl : UserControl
             {
                 c.Airspace,
                 c.Aircraft,
-                FirstSeen = c.FirstSeen.ToLongTimeString(),
-                LastSeen = c.LastSeen.ToLongTimeString(),
+                FirstSeen = FormatTime(c.FirstSeen),
+                LastSeen = FormatTime(c.LastSeen),
                 c.Severity
             })
             .ToList();
@@ -125,7 +135,8 @@ internal sealed class FireAirspaceControl : UserControl
         SettingsChanged?.Invoke(this, new SeparationSettings
         {
             Horizontal_nm = (double)_horizontalNm.Value,
-            Vertical_ft = (double)_verticalFt.Value
+            Vertical_ft = (double)_verticalFt.Value,
+            PreFireActivationSeconds = (double)_preFireSeconds.Value
         });
     }
 
@@ -140,6 +151,16 @@ internal sealed class FireAirspaceControl : UserControl
         {
             _verticalFt.Value = (decimal)settings.Vertical_ft;
         }
+
+        if (_preFireSeconds.Value != (decimal)settings.PreFireActivationSeconds)
+        {
+            _preFireSeconds.Value = (decimal)settings.PreFireActivationSeconds;
+        }
+    }
+
+    private static string FormatTime(DateTime value)
+    {
+        return value.ToString("HH:mm:ss");
     }
 
     private static TabPage BuildTab(string text, Control body)

@@ -30,7 +30,7 @@ internal sealed class AirspaceVolume
     public double LateralBuffer_m { get; set; }
     public List<AirspaceConflict> Conflicts { get; } = new();
 
-    public Color GetDisplayColor(DateTime missionTime)
+    public Color GetDisplayColor(DateTime missionTime, double preFireActivationSeconds)
     {
         if (Conflicts.Count > 0 || IsExecuted)
         {
@@ -39,10 +39,10 @@ internal sealed class AirspaceVolume
 
         if (IsTimedExecutionMission
             && ScheduledExecutionTime.HasValue
-            && missionTime >= ScheduledExecutionTime.Value.AddSeconds(-60)
-            && missionTime <= ScheduledExecutionTime.Value.AddSeconds(60))
+            && missionTime >= ScheduledExecutionTime.Value.AddSeconds(-Math.Max(0, preFireActivationSeconds))
+            && missionTime < ScheduledExecutionTime.Value)
         {
-            return Color.Red;
+            return Color.Yellow;
         }
 
         if (IsAimed)
