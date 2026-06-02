@@ -24,7 +24,10 @@ internal sealed class AirspaceVolume
     public bool HasTargetListed { get; set; }
     public bool IsAimed { get; set; }
     public bool IsTimedExecutionMission { get; set; }
+    public bool IsRoundsComplete { get; set; }
     public DateTime? ScheduledExecutionTime { get; set; }
+    public DateTime? RoundsCompleteRedUntil { get; set; }
+    public DateTime? RoundsCompleteBlackUntil { get; set; }
     public double LowerAltitudeMsl_m { get; set; }
     public double UpperAltitudeMsl_m { get; set; }
     public double LateralBuffer_m { get; set; }
@@ -32,7 +35,25 @@ internal sealed class AirspaceVolume
 
     public Color GetDisplayColor(DateTime missionTime, double preFireActivationSeconds)
     {
-        if (Conflicts.Count > 0 || IsExecuted)
+        if (Conflicts.Count > 0)
+        {
+            return Color.Red;
+        }
+
+        if (IsRoundsComplete)
+        {
+            if (RoundsCompleteRedUntil.HasValue && missionTime <= RoundsCompleteRedUntil.Value)
+            {
+                return Color.Red;
+            }
+
+            if (RoundsCompleteBlackUntil.HasValue && missionTime <= RoundsCompleteBlackUntil.Value)
+            {
+                return Color.Black;
+            }
+        }
+
+        if (IsExecuted)
         {
             return Color.Red;
         }
@@ -45,7 +66,7 @@ internal sealed class AirspaceVolume
             return Color.Yellow;
         }
 
-        if (IsAimed)
+        if (IsAimed && !IsTimedExecutionMission)
         {
             return Color.Yellow;
         }

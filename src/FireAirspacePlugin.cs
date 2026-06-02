@@ -146,6 +146,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         for (var i = 0; i < args.Missions.Count; i++)
         {
             var displayIndex = _pendingAimDisplayIndex
+                ?? TryGetUiMissionDisplayIndex(args.Missions[i])
                 ?? (args.Missions.Count > 1 ? i : -1);
             var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, _mission?.MissionTime ?? DateTime.Now, displayIndex);
             if (snapshot.IsPlaceholder)
@@ -572,7 +573,10 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             existing.HasTargetListed = volume.HasTargetListed;
             existing.IsAimed = volume.IsAimed;
             existing.IsTimedExecutionMission = volume.IsTimedExecutionMission;
+            existing.IsRoundsComplete = volume.IsRoundsComplete;
             existing.ScheduledExecutionTime = volume.ScheduledExecutionTime;
+            existing.RoundsCompleteRedUntil = volume.RoundsCompleteRedUntil;
+            existing.RoundsCompleteBlackUntil = volume.RoundsCompleteBlackUntil;
         }
 
         UpdateDeconfliction();
@@ -640,6 +644,12 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         foreach (var mission in _missions)
         {
             var sourceKey = GetMissionSourceKey(mission);
+            if (mission.IsRoundsComplete)
+            {
+                MarkRoundsComplete(sourceKey, mission);
+                continue;
+            }
+
             if (mission.IsTerminal)
             {
                 _activeVolumes.RemoveAll(v => v.SourceKey == sourceKey);
@@ -690,8 +700,48 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             existing.HasTargetListed = volume.HasTargetListed;
             existing.IsAimed = volume.IsAimed;
             existing.IsTimedExecutionMission = volume.IsTimedExecutionMission;
+            existing.IsRoundsComplete = volume.IsRoundsComplete;
             existing.ScheduledExecutionTime = volume.ScheduledExecutionTime;
+            existing.RoundsCompleteRedUntil = volume.RoundsCompleteRedUntil;
+            existing.RoundsCompleteBlackUntil = volume.RoundsCompleteBlackUntil;
         }
+    }
+
+    private void MarkRoundsComplete(string sourceKey, CallForFireMissionSnapshot mission)
+    {
+        if (_mission == null)
+        {
+            return;
+        }
+
+        var volume = _activeVolumes.FirstOrDefault(v => v.SourceKey == sourceKey);
+        if (volume == null)
+        {
+            var battery = FindBatteryEntity(mission);
+            if (battery == null || mission.TargetPoint == null)
+            {
+                return;
+            }
+
+            volume = AirspaceGeometry.BuildVolume(
+                mission,
+                battery,
+                mission.TargetPoint,
+                _mission.MissionTime,
+                TimeSpan.FromHours(6),
+                false);
+            ApplyMissionOverlayState(volume, mission);
+            _activeVolumes.Add(volume);
+        }
+
+        var redUntil = _mission.MissionTime.AddSeconds(Math.Max(0, mission.TimeOfFlight_s));
+        var blackUntil = redUntil.AddSeconds(Math.Max(0, _separationSettings.PreFireActivationSeconds));
+        volume.IsRoundsComplete = true;
+        volume.IsExecuted = true;
+        volume.IsAimed = false;
+        volume.RoundsCompleteRedUntil = redUntil;
+        volume.RoundsCompleteBlackUntil = blackUntil;
+        volume.NotBefore = blackUntil;
     }
 
     private static string GetMissionSourceKey(CallForFireMissionSnapshot mission)
@@ -730,6 +780,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         volume.IsAimed = mission != null && (mission.IsAimed || _manuallyAimedDisplayIndexes.Contains(mission.DisplayIndex));
         volume.IsTimedExecutionMission = mission?.IsTimedExecutionMission ?? false;
         volume.ScheduledExecutionTime = mission?.ScheduledExecutionTime;
+        volume.IsRoundsComplete = mission?.IsRoundsComplete ?? false;
     }
 
     private void OnTimer(object? sender, EventArgs e)
@@ -815,6 +866,109 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             UpdateMapOverlay();
             RefreshControl();
         }
+    }
+
+    private int? TryGetUiMissionDisplayIndex(ICallForFire.CallForFireEventArgs.CallForFireMission mission)
+    {
+        var bestDisplayIndex = -1;
+        var bestScore = 0;
+
+        foreach (Form form in Application.OpenForms)
+        {
+            var formControls = EnumerateControls(form)
+                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
+                .ToList();
+
+            for (var i = 0; i < formControls.Count; i++)
+            {
+                var missionControl = formControls[i];
+                var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+                var formIndex = GetCallForFireFormIndex(parentForm);
+                var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, i);
+                if (formIndex < 0 || missionIndex < 0)
+                {
+                    continue;
+                }
+
+                var score = ScoreMissionControl(missionControl, mission);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
+                }
+            }
+        }
+
+        return bestScore >= 4 ? bestDisplayIndex : null;
+    }
+
+    private static int ScoreMissionControl(Control missionControl, ICallForFire.CallForFireEventArgs.CallForFireMission mission)
+    {
+        var score = 0;
+        score += ScoreControlText(missionControl, "txtTargetLocation", mission.TargetLocation, 4);
+        score += ScoreControlText(missionControl, "txtTargetNumber", mission.TargetNumber, 2);
+        score += ScoreControlText(missionControl, "ddlOrdnance", mission.Round, 2);
+
+        if (mission.NumberOfRounds > 0 && ScoreNumericControl(missionControl, "nudNumberOfRounds", mission.NumberOfRounds))
+        {
+            score += 1;
+        }
+
+        var maxOrdinateText = GetControlText(GetReflectedMemberValue(missionControl, "lbMaxOrdinate_m") as Control);
+        if (mission.MaxOrdinateMSL_m > 0 && TextContainsRoundedNumber(maxOrdinateText, mission.MaxOrdinateMSL_m))
+        {
+            score += 1;
+        }
+
+        var gtlText = GetControlText(GetReflectedMemberValue(missionControl, "lbHdgGunToTgt_deg") as Control);
+        if (mission.GunTargetLine_deg > 0 && TextContainsRoundedNumber(gtlText, mission.GunTargetLine_deg))
+        {
+            score += 1;
+        }
+
+        return score;
+    }
+
+    private static int ScoreControlText(Control missionControl, string fieldName, string? expected, int points)
+    {
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return 0;
+        }
+
+        var control = GetReflectedMemberValue(missionControl, fieldName) as Control;
+        var text = GetControlText(control);
+        return string.Equals(text, expected, StringComparison.OrdinalIgnoreCase) ? points : 0;
+    }
+
+    private static bool ScoreNumericControl(Control missionControl, string fieldName, int expected)
+    {
+        var control = GetReflectedMemberValue(missionControl, fieldName);
+        if (control == null)
+        {
+            return false;
+        }
+
+        var value = GetReflectedMemberValue(control!, "Value");
+        return TryConvertToInt(value, out var actual) && actual == expected;
+    }
+
+    private static string GetControlText(Control? control)
+    {
+        return control?.Text?.Trim() ?? "";
+    }
+
+    private static bool TextContainsRoundedNumber(string text, double expected)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var rounded = Math.Round(expected).ToString();
+        var oneDecimal = expected.ToString("0.0");
+        return text.IndexOf(rounded, StringComparison.OrdinalIgnoreCase) >= 0
+            || text.IndexOf(oneDecimal, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private int GetCallForFireFormIndex(object? parentForm)
@@ -1024,7 +1178,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var signature = string.Join("|", _activeVolumes
             .OrderBy(v => v.SourceKey)
-            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}:{GetOverlayColor(v, _mission.MissionTime).ToArgb()}:{(v.ScheduledExecutionTime?.Ticks ?? 0)}:{v.IsAimed}:{v.HasTargetListed}:{v.IsTimedExecutionMission}:{_separationSettings.PreFireActivationSeconds:0}"));
+            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}:{GetOverlayColor(v, _mission.MissionTime).ToArgb()}:{(v.ScheduledExecutionTime?.Ticks ?? 0)}:{v.IsAimed}:{v.HasTargetListed}:{v.IsTimedExecutionMission}:{_separationSettings.PreFireActivationSeconds:0}:{v.IsRoundsComplete}:{(v.RoundsCompleteRedUntil?.Ticks ?? 0)}:{(v.RoundsCompleteBlackUntil?.Ticks ?? 0)}"));
         if (signature == _lastOverlaySignature)
         {
             return;

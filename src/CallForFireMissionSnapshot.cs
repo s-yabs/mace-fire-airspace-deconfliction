@@ -34,6 +34,7 @@ internal sealed class CallForFireMissionSnapshot
     public bool ShouldDrawOverlay => HasTargetListed;
     public bool IsAimed => Status == "Aimed" || Status == "Executing";
     public bool IsExecuting => Status == "Executing";
+    public bool IsRoundsComplete => Status == "RoundsComplete";
     public bool IsTimedExecutionMission => ScheduledExecutionTime.HasValue
         && (HasToken(MethodOfControlText, "TIMEONTARGET")
             || HasToken(MethodOfControlText, "TOT")
