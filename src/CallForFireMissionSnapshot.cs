@@ -99,7 +99,7 @@ internal sealed class CallForFireMissionSnapshot
         };
     }
 
-    private static DateTime? ParseScheduledExecutionTime(string? timeText, DateTime referenceMissionTime)
+    public static DateTime? ParseScheduledExecutionTime(string? timeText, DateTime referenceMissionTime)
     {
         if (string.IsNullOrWhiteSpace(timeText))
         {

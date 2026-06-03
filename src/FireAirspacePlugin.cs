@@ -154,6 +154,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 continue;
             }
 
+            if (snapshot.ScheduledExecutionTime == null && snapshot.DisplayIndex >= 0)
+            {
+                snapshot.ScheduledExecutionTime = TryGetUiScheduledExecutionTime(snapshot.DisplayIndex, _mission?.MissionTime ?? DateTime.Now);
+            }
+
             MergeMissionSnapshot(snapshot);
             UpdateManualAimState(snapshot);
             _pendingAimDisplayIndex = null;
@@ -392,6 +397,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         if (existing != null)
         {
             snapshot.DisplayIndex = existing.DisplayIndex;
+            snapshot.ScheduledExecutionTime ??= existing.ScheduledExecutionTime;
             var index = _missions.IndexOf(existing);
             _missions[index] = snapshot;
             return;
@@ -900,6 +906,58 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         }
 
         return bestScore >= 4 ? bestDisplayIndex : null;
+    }
+
+    private DateTime? TryGetUiScheduledExecutionTime(int displayIndex, DateTime missionTime)
+    {
+        var missionControl = TryGetMissionControlByDisplayIndex(displayIndex);
+        if (missionControl == null)
+        {
+            return null;
+        }
+
+        foreach (var fieldName in new[] { "txtFirePlanStartTime", "txtTimeOnTarget", "txtTimeToTarget" })
+        {
+            var text = GetControlText(GetReflectedMemberValue(missionControl, fieldName) as Control);
+            var parsed = CallForFireMissionSnapshot.ParseScheduledExecutionTime(text, missionTime);
+            if (parsed.HasValue)
+            {
+                return parsed.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private Control? TryGetMissionControlByDisplayIndex(int displayIndex)
+    {
+        if (displayIndex < 0)
+        {
+            return null;
+        }
+
+        var targetFormIndex = displayIndex / 8;
+        var targetMissionIndex = displayIndex % 8;
+        foreach (Form form in Application.OpenForms)
+        {
+            var formControls = EnumerateControls(form)
+                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
+                .ToList();
+
+            for (var i = 0; i < formControls.Count; i++)
+            {
+                var missionControl = formControls[i];
+                var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+                var formIndex = GetCallForFireFormIndex(parentForm);
+                var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, i);
+                if (formIndex == targetFormIndex && missionIndex == targetMissionIndex)
+                {
+                    return missionControl;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static int ScoreMissionControl(Control missionControl, ICallForFire.CallForFireEventArgs.CallForFireMission mission)
