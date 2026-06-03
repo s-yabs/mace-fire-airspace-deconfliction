@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>MaceFireAirspace</AssemblyName>
     <RootNamespace>MaceFireAirspace</RootNamespace>
+    <Version>0.2.0</Version>
+    <FileVersion>0.2.0.0</FileVersion>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
