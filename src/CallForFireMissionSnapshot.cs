@@ -32,15 +32,10 @@ internal sealed class CallForFireMissionSnapshot
     public string MissionName => MissionNumber > 0 ? $"Mission {MissionNumber}" : "Mission ?";
     public bool HasTargetListed => TargetPoint != null;
     public bool ShouldDrawOverlay => HasTargetListed;
-    public bool IsAimed => Status == "Aimed" || Status == "Executing";
+    public bool IsAimed => Status == "Aimed";
     public bool IsExecuting => Status == "Executing";
     public bool IsRoundsComplete => Status == "RoundsComplete";
-    public bool IsTimedExecutionMission => ScheduledExecutionTime.HasValue
-        && (HasToken(MethodOfControlText, "TIMEONTARGET")
-            || HasToken(MethodOfControlText, "TOT")
-            || HasToken(MethodOfControlText, "FIREPLAN")
-            || HasToken(SeadMissionTypeText, "FIREPLAN")
-            || HasToken(SeadMissionTypeText, "TIMEONTARGET"));
+    public bool IsTimedExecutionMission => ScheduledExecutionTime.HasValue;
     public bool IsTerminal => Status == "RoundsComplete" || Status == "EndMission" || Status == "NoSolution" || Status == "CheckFire";
     public bool IsPlaceholder =>
         RequestId <= 0
