@@ -16,6 +16,7 @@ internal sealed class FireAirspaceControl : UserControl
     private readonly NumericUpDown _verticalFt = new();
     private readonly NumericUpDown _preFireSeconds = new();
     private readonly Button _plannedAimedColor = new();
+    private readonly Button _preparingToFireColor = new();
     private readonly Button _firingColor = new();
     private readonly Button _coldColor = new();
 
@@ -54,7 +55,8 @@ internal sealed class FireAirspaceControl : UserControl
         _preFireSeconds.Value = 60;
         _preFireSeconds.ValueChanged += (_, _) => RaiseSettingsChanged();
 
-        ConfigureColorButton(_plannedAimedColor, Color.Yellow);
+        ConfigureColorButton(_plannedAimedColor, Color.Green);
+        ConfigureColorButton(_preparingToFireColor, Color.Yellow);
         ConfigureColorButton(_firingColor, Color.Red);
         ConfigureColorButton(_coldColor, Color.Black);
 
@@ -140,6 +142,7 @@ internal sealed class FireAirspaceControl : UserControl
             Vertical_ft = (double)_verticalFt.Value,
             PreFireActivationSeconds = (double)_preFireSeconds.Value,
             PlannedAimedColor = _plannedAimedColor.BackColor,
+            PreparingToFireColor = _preparingToFireColor.BackColor,
             FiringColor = _firingColor.BackColor,
             ColdColor = _coldColor.BackColor
         });
@@ -163,6 +166,7 @@ internal sealed class FireAirspaceControl : UserControl
         }
 
         SetColorButton(_plannedAimedColor, settings.PlannedAimedColor);
+        SetColorButton(_preparingToFireColor, settings.PreparingToFireColor);
         SetColorButton(_firingColor, settings.FiringColor);
         SetColorButton(_coldColor, settings.ColdColor);
     }
@@ -186,7 +190,7 @@ internal sealed class FireAirspaceControl : UserControl
             AutoSize = true,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = 6
+            RowCount = 8
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
@@ -194,11 +198,28 @@ internal sealed class FireAirspaceControl : UserControl
         AddSettingRow(panel, 0, "Horizontal NM", _horizontalNm);
         AddSettingRow(panel, 1, "Vertical ft", _verticalFt);
         AddSettingRow(panel, 2, "Pre-fire sec", _preFireSeconds);
-        AddSettingRow(panel, 3, "Preparing to Fire GTL", _plannedAimedColor);
-        AddSettingRow(panel, 4, "Firing GTL", _firingColor);
-        AddSettingRow(panel, 5, "Cold GTL", _coldColor);
+        AddSectionHeader(panel, 3, "GTL Colors");
+        AddSettingRow(panel, 4, "Planned/Aimed", _plannedAimedColor);
+        AddSettingRow(panel, 5, "Preparing to Fire", _preparingToFireColor);
+        AddSettingRow(panel, 6, "Firing", _firingColor);
+        AddSettingRow(panel, 7, "Cold", _coldColor);
 
         return new TabPage("Settings") { Controls = { panel } };
+    }
+
+    private static void AddSectionHeader(TableLayoutPanel panel, int row, string text)
+    {
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        var label = new Label
+        {
+            Text = text,
+            AutoSize = true,
+            Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+            Anchor = AnchorStyles.Left,
+            Padding = new Padding(0, 8, 0, 0)
+        };
+        panel.Controls.Add(label, 0, row);
+        panel.SetColumnSpan(label, 2);
     }
 
     private static void AddSettingRow(TableLayoutPanel panel, int row, string labelText, Control control)

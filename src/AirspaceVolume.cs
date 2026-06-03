@@ -37,6 +37,7 @@ internal sealed class AirspaceVolume
         DateTime missionTime,
         double preFireActivationSeconds,
         Color plannedAimedColor,
+        Color preparingToFireColor,
         Color firingColor,
         Color coldColor)
     {
@@ -68,17 +69,17 @@ internal sealed class AirspaceVolume
             && missionTime >= ScheduledExecutionTime.Value.AddSeconds(-Math.Max(0, preFireActivationSeconds))
             && missionTime < ScheduledExecutionTime.Value)
         {
-            return plannedAimedColor;
+            return preparingToFireColor;
         }
 
-        if (IsAimed && !IsTimedExecutionMission)
+        if (IsAimed)
         {
             return plannedAimedColor;
         }
 
         if (HasTargetListed)
         {
-            return Color.Green;
+            return plannedAimedColor;
         }
 
         return Color.Orange;
