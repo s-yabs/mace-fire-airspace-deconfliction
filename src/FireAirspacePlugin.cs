@@ -673,7 +673,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 mission.TargetPoint,
                 _mission.MissionTime,
                 TimeSpan.FromHours(6),
-                mission.IsExecuting);
+                false);
             ApplyMissionOverlayState(volume, mission);
 
             var existing = _activeVolumes.FirstOrDefault(v => v.SourceKey == sourceKey);
