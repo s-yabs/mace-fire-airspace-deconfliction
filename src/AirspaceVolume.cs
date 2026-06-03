@@ -33,29 +33,34 @@ internal sealed class AirspaceVolume
     public double LateralBuffer_m { get; set; }
     public List<AirspaceConflict> Conflicts { get; } = new();
 
-    public Color GetDisplayColor(DateTime missionTime, double preFireActivationSeconds)
+    public Color GetDisplayColor(
+        DateTime missionTime,
+        double preFireActivationSeconds,
+        Color plannedAimedColor,
+        Color firingColor,
+        Color coldColor)
     {
         if (Conflicts.Count > 0)
         {
-            return Color.Red;
+            return firingColor;
         }
 
         if (IsRoundsComplete)
         {
             if (RoundsCompleteRedUntil.HasValue && missionTime <= RoundsCompleteRedUntil.Value)
             {
-                return Color.Red;
+                return firingColor;
             }
 
             if (RoundsCompleteBlackUntil.HasValue && missionTime <= RoundsCompleteBlackUntil.Value)
             {
-                return Color.Black;
+                return coldColor;
             }
         }
 
         if (IsExecuted)
         {
-            return Color.Red;
+            return firingColor;
         }
 
         if (IsTimedExecutionMission
@@ -63,12 +68,12 @@ internal sealed class AirspaceVolume
             && missionTime >= ScheduledExecutionTime.Value.AddSeconds(-Math.Max(0, preFireActivationSeconds))
             && missionTime < ScheduledExecutionTime.Value)
         {
-            return Color.Yellow;
+            return plannedAimedColor;
         }
 
         if (IsAimed && !IsTimedExecutionMission)
         {
-            return Color.Yellow;
+            return plannedAimedColor;
         }
 
         if (HasTargetListed)

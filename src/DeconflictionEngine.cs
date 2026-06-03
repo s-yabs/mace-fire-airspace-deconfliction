@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using BSI.MACE;
 
 namespace MaceFireAirspace;
@@ -43,6 +44,9 @@ internal sealed class SeparationSettings
     public double Horizontal_nm { get; set; } = 1.0;
     public double Vertical_ft { get; set; } = 1000;
     public double PreFireActivationSeconds { get; set; } = 60;
+    public Color PlannedAimedColor { get; set; } = Color.Yellow;
+    public Color FiringColor { get; set; } = Color.Red;
+    public Color ColdColor { get; set; } = Color.Black;
     public double Horizontal_m => Horizontal_nm * 1852.0;
 }
 

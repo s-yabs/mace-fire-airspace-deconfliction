@@ -77,6 +77,9 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 _separationSettings.Horizontal_nm = settings.Horizontal_nm;
                 _separationSettings.Vertical_ft = settings.Vertical_ft;
                 _separationSettings.PreFireActivationSeconds = settings.PreFireActivationSeconds;
+                _separationSettings.PlannedAimedColor = settings.PlannedAimedColor;
+                _separationSettings.FiringColor = settings.FiringColor;
+                _separationSettings.ColdColor = settings.ColdColor;
                 UpdateDeconfliction();
                 UpdateMapOverlay();
                 RefreshControl();
@@ -1236,7 +1239,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var signature = string.Join("|", _activeVolumes
             .OrderBy(v => v.SourceKey)
-            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}:{GetOverlayColor(v, _mission.MissionTime).ToArgb()}:{(v.ScheduledExecutionTime?.Ticks ?? 0)}:{v.IsAimed}:{v.HasTargetListed}:{v.IsTimedExecutionMission}:{_separationSettings.PreFireActivationSeconds:0}:{v.IsRoundsComplete}:{(v.RoundsCompleteRedUntil?.Ticks ?? 0)}:{(v.RoundsCompleteBlackUntil?.Ticks ?? 0)}"));
+            .Select(v => $"{v.SourceKey}:{v.NotBefore.Ticks}:{v.IsExecuted}:{v.Conflicts.Count}:{v.Polygon.Count}:{v.FootprintPolygons.Count}:{GetOverlayColor(v, _mission.MissionTime).ToArgb()}:{(v.ScheduledExecutionTime?.Ticks ?? 0)}:{v.IsAimed}:{v.HasTargetListed}:{v.IsTimedExecutionMission}:{_separationSettings.PreFireActivationSeconds:0}:{v.IsRoundsComplete}:{(v.RoundsCompleteRedUntil?.Ticks ?? 0)}:{(v.RoundsCompleteBlackUntil?.Ticks ?? 0)}:{_separationSettings.PlannedAimedColor.ToArgb()}:{_separationSettings.FiringColor.ToArgb()}:{_separationSettings.ColdColor.ToArgb()}"));
         if (signature == _lastOverlaySignature)
         {
             return;
@@ -1253,7 +1256,12 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     private Color GetOverlayColor(AirspaceVolume volume, DateTime missionTime)
     {
-        return volume.GetDisplayColor(missionTime, _separationSettings.PreFireActivationSeconds);
+        return volume.GetDisplayColor(
+            missionTime,
+            _separationSettings.PreFireActivationSeconds,
+            _separationSettings.PlannedAimedColor,
+            _separationSettings.FiringColor,
+            _separationSettings.ColdColor);
     }
 
     private void AddVolumeOverlay(AirspaceVolume volume, Color color)

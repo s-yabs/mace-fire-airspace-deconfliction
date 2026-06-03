@@ -15,6 +15,9 @@ internal sealed class FireAirspaceControl : UserControl
     private readonly NumericUpDown _horizontalNm = new();
     private readonly NumericUpDown _verticalFt = new();
     private readonly NumericUpDown _preFireSeconds = new();
+    private readonly Button _plannedAimedColor = new();
+    private readonly Button _firingColor = new();
+    private readonly Button _coldColor = new();
 
     public event EventHandler? RefreshRequested;
     public event EventHandler<SeparationSettings>? SettingsChanged;
@@ -25,6 +28,7 @@ internal sealed class FireAirspaceControl : UserControl
         tabs.TabPages.Add(BuildTab("Call For Fire", _missionsGrid));
         tabs.TabPages.Add(BuildTab("Active Airspace", _activeGrid));
         tabs.TabPages.Add(BuildTab("Conflicts", _conflictsGrid));
+        tabs.TabPages.Add(BuildSettingsTab());
 
         _refreshButton.Text = "Refresh";
         _refreshButton.AutoSize = true;
@@ -50,6 +54,10 @@ internal sealed class FireAirspaceControl : UserControl
         _preFireSeconds.Value = 60;
         _preFireSeconds.ValueChanged += (_, _) => RaiseSettingsChanged();
 
+        ConfigureColorButton(_plannedAimedColor, Color.Yellow);
+        ConfigureColorButton(_firingColor, Color.Red);
+        ConfigureColorButton(_coldColor, Color.Black);
+
         var header = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -58,12 +66,6 @@ internal sealed class FireAirspaceControl : UserControl
             Padding = new Padding(8)
         };
         header.Controls.Add(_refreshButton);
-        header.Controls.Add(_preFireSeconds);
-        header.Controls.Add(new Label { Text = "Pre-fire sec", AutoSize = true, Padding = new Padding(8, 6, 0, 0) });
-        header.Controls.Add(_verticalFt);
-        header.Controls.Add(new Label { Text = "Vertical ft", AutoSize = true, Padding = new Padding(8, 6, 0, 0) });
-        header.Controls.Add(_horizontalNm);
-        header.Controls.Add(new Label { Text = "Horizontal NM", AutoSize = true, Padding = new Padding(8, 6, 0, 0) });
 
         Controls.Add(tabs);
         Controls.Add(header);
@@ -136,7 +138,10 @@ internal sealed class FireAirspaceControl : UserControl
         {
             Horizontal_nm = (double)_horizontalNm.Value,
             Vertical_ft = (double)_verticalFt.Value,
-            PreFireActivationSeconds = (double)_preFireSeconds.Value
+            PreFireActivationSeconds = (double)_preFireSeconds.Value,
+            PlannedAimedColor = _plannedAimedColor.BackColor,
+            FiringColor = _firingColor.BackColor,
+            ColdColor = _coldColor.BackColor
         });
     }
 
@@ -156,6 +161,10 @@ internal sealed class FireAirspaceControl : UserControl
         {
             _preFireSeconds.Value = (decimal)settings.PreFireActivationSeconds;
         }
+
+        SetColorButton(_plannedAimedColor, settings.PlannedAimedColor);
+        SetColorButton(_firingColor, settings.FiringColor);
+        SetColorButton(_coldColor, settings.ColdColor);
     }
 
     private static string FormatTime(DateTime value)
@@ -167,6 +176,71 @@ internal sealed class FireAirspaceControl : UserControl
     {
         body.Dock = DockStyle.Fill;
         return new TabPage(text) { Controls = { body } };
+    }
+
+    private TabPage BuildSettingsTab()
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Padding = new Padding(12),
+            ColumnCount = 2,
+            RowCount = 6
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+
+        AddSettingRow(panel, 0, "Horizontal NM", _horizontalNm);
+        AddSettingRow(panel, 1, "Vertical ft", _verticalFt);
+        AddSettingRow(panel, 2, "Pre-fire sec", _preFireSeconds);
+        AddSettingRow(panel, 3, "Planned/Aimed GTL", _plannedAimedColor);
+        AddSettingRow(panel, 4, "Firing GTL", _firingColor);
+        AddSettingRow(panel, 5, "Cold GTL", _coldColor);
+
+        return new TabPage("Settings") { Controls = { panel } };
+    }
+
+    private static void AddSettingRow(TableLayoutPanel panel, int row, string labelText, Control control)
+    {
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        panel.Controls.Add(new Label
+        {
+            Text = labelText,
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Padding = new Padding(0, 7, 0, 0)
+        }, 0, row);
+        control.Anchor = AnchorStyles.Left;
+        panel.Controls.Add(control, 1, row);
+    }
+
+    private void ConfigureColorButton(Button button, Color color)
+    {
+        button.Width = 70;
+        button.Height = 24;
+        button.FlatStyle = FlatStyle.Flat;
+        SetColorButton(button, color);
+        button.Click += (_, _) =>
+        {
+            using var dialog = new ColorDialog
+            {
+                Color = button.BackColor,
+                FullOpen = true
+            };
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                SetColorButton(button, dialog.Color);
+                RaiseSettingsChanged();
+            }
+        };
+    }
+
+    private static void SetColorButton(Button button, Color color)
+    {
+        button.BackColor = color;
+        button.ForeColor = color.GetBrightness() < 0.45 ? Color.White : Color.Black;
+        button.Text = $"{color.R},{color.G},{color.B}";
     }
 
     private static void ConfigureGrid(DataGridView grid)
