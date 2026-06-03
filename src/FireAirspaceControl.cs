@@ -194,7 +194,7 @@ internal sealed class FireAirspaceControl : UserControl
         AddSettingRow(panel, 0, "Horizontal NM", _horizontalNm);
         AddSettingRow(panel, 1, "Vertical ft", _verticalFt);
         AddSettingRow(panel, 2, "Pre-fire sec", _preFireSeconds);
-        AddSettingRow(panel, 3, "Planned/Aimed GTL", _plannedAimedColor);
+        AddSettingRow(panel, 3, "Preparing to Fire GTL", _plannedAimedColor);
         AddSettingRow(panel, 4, "Firing GTL", _firingColor);
         AddSettingRow(panel, 5, "Cold GTL", _coldColor);
 
@@ -239,8 +239,7 @@ internal sealed class FireAirspaceControl : UserControl
     private static void SetColorButton(Button button, Color color)
     {
         button.BackColor = color;
-        button.ForeColor = color.GetBrightness() < 0.45 ? Color.White : Color.Black;
-        button.Text = $"{color.R},{color.G},{color.B}";
+        button.Text = "";
     }
 
     private static void ConfigureGrid(DataGridView grid)
