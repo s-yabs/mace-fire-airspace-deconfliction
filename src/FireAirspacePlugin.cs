@@ -30,6 +30,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private readonly List<IMapPrimitive> _mapPrimitives = new();
     private readonly HashSet<Control> _hookedAimButtons = new();
     private readonly HashSet<int> _manuallyAimedDisplayIndexes = new();
+    private readonly List<object> _knownCffForms = new();
     private int _timerTicks;
     private int _nextMissionDisplayIndex;
     private int? _pendingAimDisplayIndex;
@@ -1352,7 +1353,26 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             }
         }
 
-        return -1;
+        return GetOrAssignCffFormIndex(parentForm);
+    }
+
+    private int GetOrAssignCffFormIndex(object parentForm)
+    {
+        for (var i = 0; i < _knownCffForms.Count; i++)
+        {
+            if (ReferenceEquals(_knownCffForms[i], parentForm))
+            {
+                return i;
+            }
+        }
+
+        if (_knownCffForms.Count >= 4)
+        {
+            return -1;
+        }
+
+        _knownCffForms.Add(parentForm);
+        return _knownCffForms.Count - 1;
     }
 
     private static int? GetSelectedMissionTabIndex(object? parentForm)
@@ -1615,6 +1635,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         _hookedAimButtons.Clear();
         _manuallyAimedDisplayIndexes.Clear();
+        _knownCffForms.Clear();
         _pendingAimDisplayIndex = null;
         _nextMissionDisplayIndex = 0;
     }
