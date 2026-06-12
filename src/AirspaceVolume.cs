@@ -64,17 +64,20 @@ internal sealed class AirspaceVolume
             return firingColor;
         }
 
-        if (IsTimedExecutionMission
-            && ScheduledExecutionTime.HasValue
-            && missionTime >= ScheduledExecutionTime.Value.AddSeconds(-Math.Max(0, preFireActivationSeconds))
-            && missionTime < ScheduledExecutionTime.Value)
+        if (IsTimedExecutionMission && ScheduledExecutionTime.HasValue)
         {
-            return preparingToFireColor;
+            var preparingStart = ScheduledExecutionTime.Value.AddSeconds(-Math.Max(0, preFireActivationSeconds));
+            if (missionTime >= preparingStart && missionTime < ScheduledExecutionTime.Value)
+            {
+                return preparingToFireColor;
+            }
+
+            return plannedAimedColor;
         }
 
         if (IsAimed)
         {
-            return plannedAimedColor;
+            return preparingToFireColor;
         }
 
         if (HasTargetListed)
