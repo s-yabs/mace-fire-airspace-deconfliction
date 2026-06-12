@@ -1269,29 +1269,6 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private void AddVolumeOverlay(AirspaceVolume volume, Color color)
     {
         AddLine(volume.GunPoint, volume.TargetPoint, color, 4);
-        AddPolyline(volume.Polygon, color, true);
-        foreach (var footprint in volume.FootprintPolygons)
-        {
-            AddPolyline(footprint, color, true);
-        }
-    }
-
-    private void AddPolyline(List<IGeoPoint> points, Color color, bool close)
-    {
-        if (points.Count < 2)
-        {
-            return;
-        }
-
-        for (var i = 0; i < points.Count - 1; i++)
-        {
-            AddLine(points[i], points[i + 1], color, 3);
-        }
-
-        if (close)
-        {
-            AddLine(points[points.Count - 1], points[0], color, 3);
-        }
     }
 
     private void AddLine(IGeoPoint start, IGeoPoint end, Color color, int width)
