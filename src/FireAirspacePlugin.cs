@@ -36,6 +36,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private int? _pendingAimDisplayIndex;
     private string _lastOverlaySignature = "";
     private string _missionIdentity = "";
+    private int _lastUiDiagnosticsTick;
 
     public string Name => "Fire Airspace Deconfliction";
 
@@ -843,6 +844,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         _timerTicks++;
         HookCallForFireAimButtons();
+        LogUiDiagnosticsIfNeeded();
         ClearIfMissionWasReset();
         if (RefreshMissionDisplayIndexesFromUi())
         {
@@ -924,6 +926,88 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 HookMissionButton(missionControl, "btnEndOfMission", missionIndex);
             }
         }
+    }
+
+    private void LogUiDiagnosticsIfNeeded()
+    {
+        if (_timerTicks - _lastUiDiagnosticsTick < 5)
+        {
+            return;
+        }
+
+        var cffControls = Application.OpenForms
+            .Cast<Form>()
+            .SelectMany(form => EnumerateControls(form)
+                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
+                .Select(control => new { Form = form, Control = control }))
+            .ToList();
+        if (cffControls.Count == 0 && _missions.Count == 0)
+        {
+            return;
+        }
+
+        _lastUiDiagnosticsTick = _timerTicks;
+        try
+        {
+            var outputPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+                "MACE",
+                "output",
+                "MaceFireAirspace-ui-debug.log");
+
+            var text = new StringBuilder();
+            text.AppendLine($"[{DateTime.Now:O}] UI diagnostics: controls={cffControls.Count}, rows={_missions.Count}, knownForms={_knownCffForms.Count}, pendingAim={_pendingAimDisplayIndex?.ToString() ?? ""}");
+            text.AppendLine("Plugin rows:");
+            foreach (var mission in _missions.OrderBy(m => m.DisplayIndex))
+            {
+                text.AppendLine($"  row displayIndex={mission.DisplayIndex}, {mission.CffFormName}/{mission.MissionName}, status={mission.Status}, battery={mission.BatteryName}, target={mission.TargetNumber}, loc={mission.TargetLocationText}, round={mission.Round}, rounds={mission.NumberOfRounds}, gtl={mission.GunTargetLine_deg:0.###}, sched={mission.ScheduledExecutionTime?.ToString("O") ?? ""}");
+            }
+
+            text.AppendLine("Open forms:");
+            foreach (Form form in Application.OpenForms)
+            {
+                text.AppendLine($"  form type={form.GetType().FullName}, name={form.Name}, text={form.Text}, controls={EnumerateControls(form).Count()}");
+            }
+
+            text.AppendLine("CFF controls:");
+            for (var i = 0; i < cffControls.Count; i++)
+            {
+                var item = cffControls[i];
+                var parentForm = GetReflectedMemberValue(item.Control, "parentCFFForm");
+                var formIndex = GetCallForFireFormIndex(parentForm);
+                var selectedMissionIndex = GetSelectedMissionTabIndex(parentForm);
+                var missionIndex = GetMissionIndexWithinForm(item.Control, parentForm, i);
+                text.AppendLine($"  control[{i}] hostForm={item.Form.GetType().FullName}/{item.Form.Name}/{item.Form.Text}, controlName={item.Control.Name}, parentType={parentForm?.GetType().FullName ?? "<null>"}, formIndex={formIndex}, selectedMissionIndex={selectedMissionIndex?.ToString() ?? ""}, missionIndex={missionIndex}");
+                text.AppendLine($"    fields targetNumber={GetNamedControlText(item.Control, "txtTargetNumber")}, targetLocation={GetNamedControlText(item.Control, "txtTargetLocation")}, ordnance={GetNamedControlText(item.Control, "ddlOrdnance")}, rounds={GetReflectedMemberValue(GetReflectedMemberValue(item.Control, "nudNumberOfRounds") ?? item.Control, "Value") ?? ""}, maxOrd={GetNamedControlText(item.Control, "lbMaxOrdinate_m")}, gtl={GetNamedControlText(item.Control, "lbHdgGunToTgt_deg")}");
+                text.AppendLine($"    parent={DescribeObject(parentForm, true)}");
+                foreach (var mission in _missions.OrderByDescending(m => ScoreMissionControl(item.Control, m)).Take(3))
+                {
+                    text.AppendLine($"    score row displayIndex={mission.DisplayIndex}, score={ScoreMissionControl(item.Control, mission)}, row={mission.CffFormName}/{mission.MissionName}, target={mission.TargetNumber}, loc={mission.TargetLocationText}, battery={mission.BatteryName}");
+                }
+            }
+
+            File.AppendAllText(outputPath, text.ToString());
+        }
+        catch
+        {
+            // Diagnostics should never interrupt MACE UI polling.
+        }
+    }
+
+    private static string GetNamedControlText(object? source, string fieldName)
+    {
+        if (source == null)
+        {
+            return "";
+        }
+
+        var value = GetReflectedMemberValue(source, fieldName);
+        if (value is Control control)
+        {
+            return GetControlText(control);
+        }
+
+        return value?.ToString()?.Trim() ?? "";
     }
 
     private void HookMissionButton(Control missionControl, string buttonFieldName, int missionIndex)
