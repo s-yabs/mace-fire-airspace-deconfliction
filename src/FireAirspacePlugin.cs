@@ -176,8 +176,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         for (var i = 0; i < args.Missions.Count; i++)
         {
-            int? displayIndexCandidate = args.Missions.Count == 1 ? _pendingAimDisplayIndex : null;
-            var displayIndex = displayIndexCandidate
+            var displayIndex = _pendingAimDisplayIndex
                 ?? TryGetBackgroundMissionDisplayIndex(sender, args.Missions[i])
                 ?? TryGetUiMissionDisplayIndex(args.Missions[i])
                 ?? -1;
@@ -439,7 +438,9 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return true;
         }
 
-        if (snapshot.DisplayIndex < 0 && snapshot.RequestId <= 0)
+        if (snapshot.DisplayIndex < 0
+            && snapshot.RequestId <= 0
+            && snapshot.IsTerminal)
         {
             return false;
         }
