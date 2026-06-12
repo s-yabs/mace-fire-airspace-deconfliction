@@ -34,6 +34,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
     private int _nextMissionDisplayIndex;
     private int? _pendingAimDisplayIndex;
     private string _lastOverlaySignature = "";
+    private string _missionIdentity = "";
 
     public string Name => "Fire Airspace Deconfliction";
 
@@ -47,10 +48,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return false;
         }
 
-        _mission.CallForFire.CallForFireEvent += OnCallForFireEvent;
-        _mission.WeaponFire += OnWeaponFire;
-        _mission.WeaponDetonation += OnWeaponDetonation;
-        _mission.Logger.EventLogged += OnEventLogged;
+        SubscribeMission(_mission);
 
         _timer = new Timer { Interval = 1000 };
         _timer.Tick += OnTimer;
@@ -104,13 +102,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     public void Close()
     {
-        if (_mission != null)
-        {
-            _mission.CallForFire.CallForFireEvent -= OnCallForFireEvent;
-            _mission.WeaponFire -= OnWeaponFire;
-            _mission.WeaponDetonation -= OnWeaponDetonation;
-            _mission.Logger.EventLogged -= OnEventLogged;
-        }
+        UnsubscribeMission(_mission);
 
         if (_timer != null)
         {
@@ -123,13 +115,48 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         _window?.Close();
         _window = null;
         _control = null;
-        _activeVolumes.Clear();
-        _conflictHistory.Clear();
-        _hookedAimButtons.Clear();
-        _manuallyAimedDisplayIndexes.Clear();
-        _pendingAimDisplayIndex = null;
-        ClearMapOverlay();
+        ResetPluginState(clearConflictHistory: true, _mission?.Map);
+        _mission = null;
+        _missionIdentity = "";
         LogInfo("Closed.");
+    }
+
+    private void SubscribeMission(IMission? mission)
+    {
+        if (mission == null)
+        {
+            return;
+        }
+
+        mission.CallForFire.CallForFireEvent += OnCallForFireEvent;
+        mission.WeaponFire += OnWeaponFire;
+        mission.WeaponDetonation += OnWeaponDetonation;
+        mission.Logger.EventLogged += OnEventLogged;
+        mission.StateChanged += OnMissionStateChanged;
+        _missionIdentity = GetMissionIdentity(mission);
+    }
+
+    private void UnsubscribeMission(IMission? mission)
+    {
+        if (mission == null)
+        {
+            return;
+        }
+
+        mission.CallForFire.CallForFireEvent -= OnCallForFireEvent;
+        mission.WeaponFire -= OnWeaponFire;
+        mission.WeaponDetonation -= OnWeaponDetonation;
+        mission.Logger.EventLogged -= OnEventLogged;
+        mission.StateChanged -= OnMissionStateChanged;
+    }
+
+    private void OnMissionStateChanged(object? sender, EventArgs e)
+    {
+        if (_mission?.State == IMission.StateEnum.Reset || _mission?.State == IMission.StateEnum.Loading)
+        {
+            ResetPluginState(clearConflictHistory: true, _mission?.Map);
+            RefreshControl();
+        }
     }
 
     private void OnCallForFireEvent(object? sender, EventArgs e)
@@ -795,6 +822,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     private void OnTimer(object? sender, EventArgs e)
     {
+        SyncMissionReference();
         if (_mission == null)
         {
             return;
@@ -802,6 +830,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         _timerTicks++;
         HookCallForFireAimButtons();
+        ClearIfMissionWasReset();
         var now = _mission.MissionTime;
         _activeVolumes.RemoveAll(v => v.NotBefore <= now);
 
@@ -813,6 +842,46 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         UpdateMapOverlay();
 
         RefreshControl();
+    }
+
+    private void SyncMissionReference()
+    {
+        var currentMission = _host?.Mission;
+        if (ReferenceEquals(currentMission, _mission))
+        {
+            return;
+        }
+
+        var oldMap = _mission?.Map;
+        UnsubscribeMission(_mission);
+        ResetPluginState(clearConflictHistory: true, oldMap);
+        _mission = currentMission;
+        SubscribeMission(_mission);
+        RefreshControl();
+        LogInfo("Mission context changed; cleared fire airspace state.");
+    }
+
+    private void ClearIfMissionWasReset()
+    {
+        if (_mission == null)
+        {
+            return;
+        }
+
+        var identity = GetMissionIdentity(_mission);
+        if (!string.Equals(identity, _missionIdentity, StringComparison.Ordinal))
+        {
+            ResetPluginState(clearConflictHistory: true, _mission.Map);
+            _missionIdentity = identity;
+            LogInfo("Mission identity changed; cleared fire airspace state.");
+            return;
+        }
+
+        if ((_mission.State == IMission.StateEnum.Reset || _mission.State == IMission.StateEnum.Loading)
+            && (_missions.Count > 0 || _activeVolumes.Count > 0 || _mapPrimitives.Count > 0))
+        {
+            ResetPluginState(clearConflictHistory: true, _mission.Map);
+        }
     }
 
     private void HookCallForFireAimButtons()
@@ -1292,16 +1361,51 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     private void ClearMapOverlay()
     {
-        if (_mission?.Map != null)
+        ClearMapOverlay(_mission?.Map);
+    }
+
+    private void ClearMapOverlay(IMap? map)
+    {
+        if (map != null)
         {
             foreach (var primitive in _mapPrimitives.ToList())
             {
-                _mission.Map.RemoveMapPrimitive(primitive);
+                try
+                {
+                    map.RemoveMapPrimitive(primitive);
+                }
+                catch
+                {
+                    // MACE may already have discarded primitives during mission reset/load.
+                }
             }
         }
 
         _mapPrimitives.Clear();
         _lastOverlaySignature = "";
+    }
+
+    private void ResetPluginState(bool clearConflictHistory, IMap? map)
+    {
+        ClearMapOverlay(map);
+        _missions.Clear();
+        _activeVolumes.Clear();
+        if (clearConflictHistory)
+        {
+            _conflictHistory.Clear();
+        }
+
+        _hookedAimButtons.Clear();
+        _manuallyAimedDisplayIndexes.Clear();
+        _pendingAimDisplayIndex = null;
+        _nextMissionDisplayIndex = 0;
+    }
+
+    private static string GetMissionIdentity(IMission mission)
+    {
+        return string.Join("|",
+            mission.FileName ?? "",
+            mission.MissionStartTime.Ticks);
     }
 
     private void RefreshControl()
