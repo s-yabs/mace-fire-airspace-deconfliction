@@ -911,20 +911,14 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     private void HookCallForFireAimButtons()
     {
-        foreach (Form form in Application.OpenForms)
+        var formControls = EnumerateCallForFireControls().ToList();
+        for (var missionIndex = 0; missionIndex < formControls.Count; missionIndex++)
         {
-            var formControls = EnumerateControls(form)
-                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
-                .ToList();
-
-            for (var missionIndex = 0; missionIndex < formControls.Count; missionIndex++)
-            {
-                var missionControl = formControls[missionIndex];
-                HookMissionButton(missionControl, "btnAim", missionIndex);
-                HookMissionButton(missionControl, "btnFire", missionIndex);
-                HookMissionButton(missionControl, "btnCeaseFire", missionIndex);
-                HookMissionButton(missionControl, "btnEndOfMission", missionIndex);
-            }
+            var missionControl = formControls[missionIndex];
+            HookMissionButton(missionControl, "btnAim", missionIndex);
+            HookMissionButton(missionControl, "btnFire", missionIndex);
+            HookMissionButton(missionControl, "btnCeaseFire", missionIndex);
+            HookMissionButton(missionControl, "btnEndOfMission", missionIndex);
         }
     }
 
@@ -935,11 +929,12 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return;
         }
 
-        var cffControls = Application.OpenForms
-            .Cast<Form>()
-            .SelectMany(form => EnumerateControls(form)
-                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
-                .Select(control => new { Form = form, Control = control }))
+        var cffControls = EnumerateCallForFireControls()
+            .Select(control => new
+            {
+                Host = control.FindForm(),
+                Control = control
+            })
             .ToList();
         if (cffControls.Count == 0 && _missions.Count == 0)
         {
@@ -977,7 +972,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 var formIndex = GetCallForFireFormIndex(parentForm);
                 var selectedMissionIndex = GetSelectedMissionTabIndex(parentForm);
                 var missionIndex = GetMissionIndexWithinForm(item.Control, parentForm, i);
-                text.AppendLine($"  control[{i}] hostForm={item.Form.GetType().FullName}/{item.Form.Name}/{item.Form.Text}, controlName={item.Control.Name}, parentType={parentForm?.GetType().FullName ?? "<null>"}, formIndex={formIndex}, selectedMissionIndex={selectedMissionIndex?.ToString() ?? ""}, missionIndex={missionIndex}");
+                text.AppendLine($"  control[{i}] hostForm={item.Host?.GetType().FullName ?? "<null>"}/{item.Host?.Name ?? ""}/{item.Host?.Text ?? ""}, controlName={item.Control.Name}, parentType={parentForm?.GetType().FullName ?? "<null>"}, formIndex={formIndex}, selectedMissionIndex={selectedMissionIndex?.ToString() ?? ""}, missionIndex={missionIndex}");
                 text.AppendLine($"    fields targetNumber={GetNamedControlText(item.Control, "txtTargetNumber")}, targetLocation={GetNamedControlText(item.Control, "txtTargetLocation")}, ordnance={GetNamedControlText(item.Control, "ddlOrdnance")}, rounds={GetReflectedMemberValue(GetReflectedMemberValue(item.Control, "nudNumberOfRounds") ?? item.Control, "Value") ?? ""}, maxOrd={GetNamedControlText(item.Control, "lbMaxOrdinate_m")}, gtl={GetNamedControlText(item.Control, "lbHdgGunToTgt_deg")}");
                 text.AppendLine($"    parent={DescribeObject(parentForm, true)}");
                 foreach (var mission in _missions.OrderByDescending(m => ScoreMissionControl(item.Control, m)).Take(3))
@@ -1059,29 +1054,21 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         var bestDisplayIndex = -1;
         var bestScore = 0;
 
-        foreach (Form form in Application.OpenForms)
+        foreach (var missionControl in EnumerateCallForFireControls())
         {
-            var formControls = EnumerateControls(form)
-                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
-                .ToList();
-
-            for (var i = 0; i < formControls.Count; i++)
+            var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+            var formIndex = GetCallForFireFormIndex(parentForm);
+            var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, 0);
+            if (formIndex < 0 || missionIndex < 0)
             {
-                var missionControl = formControls[i];
-                var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
-                var formIndex = GetCallForFireFormIndex(parentForm);
-                var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, i);
-                if (formIndex < 0 || missionIndex < 0)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                var score = ScoreMissionControl(missionControl, mission);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
-                }
+            var score = ScoreMissionControl(missionControl, mission);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
             }
         }
 
@@ -1093,29 +1080,21 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         var bestDisplayIndex = -1;
         var bestScore = 0;
 
-        foreach (Form form in Application.OpenForms)
+        foreach (var missionControl in EnumerateCallForFireControls())
         {
-            var formControls = EnumerateControls(form)
-                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
-                .ToList();
-
-            for (var i = 0; i < formControls.Count; i++)
+            var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+            var formIndex = GetCallForFireFormIndex(parentForm);
+            var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, 0);
+            if (formIndex < 0 || missionIndex < 0)
             {
-                var missionControl = formControls[i];
-                var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
-                var formIndex = GetCallForFireFormIndex(parentForm);
-                var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, i);
-                if (formIndex < 0 || missionIndex < 0)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                var score = ScoreMissionControl(missionControl, mission);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
-                }
+            var score = ScoreMissionControl(missionControl, mission);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
             }
         }
 
@@ -1255,22 +1234,14 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var targetFormIndex = displayIndex / 8;
         var targetMissionIndex = displayIndex % 8;
-        foreach (Form form in Application.OpenForms)
+        foreach (var missionControl in EnumerateCallForFireControls())
         {
-            var formControls = EnumerateControls(form)
-                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
-                .ToList();
-
-            for (var i = 0; i < formControls.Count; i++)
+            var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+            var formIndex = GetCallForFireFormIndex(parentForm);
+            var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, 0);
+            if (formIndex == targetFormIndex && missionIndex == targetMissionIndex)
             {
-                var missionControl = formControls[i];
-                var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
-                var formIndex = GetCallForFireFormIndex(parentForm);
-                var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, i);
-                if (formIndex == targetFormIndex && missionIndex == targetMissionIndex)
-                {
-                    return missionControl;
-                }
+                return missionControl;
             }
         }
 
@@ -1412,6 +1383,16 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return -1;
         }
 
+        var reflectedForms = GetReflectedCallForFireForms().ToList();
+        for (var i = 0; i < reflectedForms.Count; i++)
+        {
+            if (ReferenceEquals(reflectedForms[i], parentForm)
+                || (reflectedForms[i] is Control reflectedControl && parentForm is Control parentControl && ContainsControl(reflectedControl, parentControl)))
+            {
+                return i;
+            }
+        }
+
         var backgroundMissions = TryGetBackgroundMissionList(_mission?.CallForFire);
         if (backgroundMissions != null)
         {
@@ -1537,6 +1518,64 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         }
 
         return fallbackMissionIndex;
+    }
+
+    private IEnumerable<Control> EnumerateCallForFireControls()
+    {
+        var seen = new HashSet<Control>();
+        foreach (var form in GetReflectedCallForFireForms().OfType<Control>())
+        {
+            foreach (var control in EnumerateControls(form).Where(IsCallForFireMissionControl))
+            {
+                if (seen.Add(control))
+                {
+                    yield return control;
+                }
+            }
+        }
+
+        foreach (Form form in Application.OpenForms)
+        {
+            foreach (var control in EnumerateControls(form).Where(IsCallForFireMissionControl))
+            {
+                if (seen.Add(control))
+                {
+                    yield return control;
+                }
+            }
+        }
+    }
+
+    private IEnumerable<object> GetReflectedCallForFireForms()
+    {
+        if (_mission?.CallForFire == null)
+        {
+            yield break;
+        }
+
+        foreach (var name in new[] { "frmCallForFire", "frmCallForFire2", "frmCallForFire3", "frmCallForFire4" })
+        {
+            var form = GetReflectedMemberValue(_mission.CallForFire, name);
+            if (form != null)
+            {
+                yield return form;
+            }
+        }
+    }
+
+    private static bool IsCallForFireMissionControl(Control control)
+    {
+        return control.GetType().FullName == "RW_ACE.FormCallForFire_Control";
+    }
+
+    private static bool ContainsControl(Control root, Control candidate)
+    {
+        if (ReferenceEquals(root, candidate))
+        {
+            return true;
+        }
+
+        return EnumerateControls(root).Any(child => ReferenceEquals(child, candidate));
     }
 
     private static IEnumerable<Control> EnumerateControls(Control parent)
