@@ -94,12 +94,12 @@ internal sealed class CallForFireMissionSnapshot
             TimeText = mission.Time ?? "",
             MethodOfControlText = mission.MethodOfControl.ToString(),
             SeadMissionTypeText = mission.SEADMissionType.ToString(),
-            ScheduledExecutionTime = ParseScheduledExecutionTime(mission.Time, missionTime),
+            ScheduledExecutionTime = ParseScheduledExecutionTime(mission.Time, missionTime, mission.MethodOfControl.ToString()),
             Status = mission.Status.ToString()
         };
     }
 
-    public static DateTime? ParseScheduledExecutionTime(string? timeText, DateTime referenceMissionTime)
+    public static DateTime? ParseScheduledExecutionTime(string? timeText, DateTime referenceMissionTime, string? timingMode = null)
     {
         if (string.IsNullOrWhiteSpace(timeText))
         {
@@ -109,6 +109,11 @@ internal sealed class CallForFireMissionSnapshot
         if (TimeSpan.TryParse(timeText, CultureInfo.InvariantCulture, out var timeOfDay)
             || TimeSpan.TryParse(timeText, out timeOfDay))
         {
+            if (IsTimeToTargetMode(timingMode))
+            {
+                return referenceMissionTime.Add(timeOfDay);
+            }
+
             return AlignToMissionDay(referenceMissionTime, timeOfDay);
         }
 
@@ -119,6 +124,18 @@ internal sealed class CallForFireMissionSnapshot
         }
 
         return null;
+    }
+
+    private static bool IsTimeToTargetMode(string? timingMode)
+    {
+        if (string.IsNullOrWhiteSpace(timingMode))
+        {
+            return false;
+        }
+
+        var normalized = Normalize(timingMode ?? "");
+        return normalized.Contains("TIMETOTARGET")
+            || normalized.Contains("TTT");
     }
 
     private static DateTime AlignToMissionDay(DateTime referenceMissionTime, TimeSpan timeOfDay)

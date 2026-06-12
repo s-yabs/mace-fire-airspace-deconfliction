@@ -989,17 +989,62 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             return null;
         }
 
-        foreach (var fieldName in new[] { "txtFirePlanStartTime", "txtTimeOnTarget", "txtTimeToTarget" })
+        var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+        foreach (var source in new object?[] { missionControl, parentForm })
         {
-            var text = GetControlText(GetReflectedMemberValue(missionControl, fieldName) as Control);
-            var parsed = CallForFireMissionSnapshot.ParseScheduledExecutionTime(text, missionTime);
-            if (parsed.HasValue)
+            foreach (var field in new[]
             {
-                return parsed.Value;
+                new ScheduledTimeField("txtFirePlanStartTime", null),
+                new ScheduledTimeField("txtTimeOnTarget", "TimeOnTarget"),
+                new ScheduledTimeField("txtTimeToTarget", "TimeToTarget")
+            })
+            {
+                var text = GetNamedControlText(source, field.Name);
+                var parsed = CallForFireMissionSnapshot.ParseScheduledExecutionTime(text, missionTime, field.TimingMode);
+                if (parsed.HasValue)
+                {
+                    return parsed.Value;
+                }
             }
         }
 
         return null;
+    }
+
+    private readonly struct ScheduledTimeField
+    {
+        public ScheduledTimeField(string name, string? timingMode)
+        {
+            Name = name;
+            TimingMode = timingMode;
+        }
+
+        public string Name { get; }
+        public string? TimingMode { get; }
+    }
+
+    private static string GetNamedControlText(object? source, string fieldName)
+    {
+        if (source == null)
+        {
+            return "";
+        }
+
+        var reflectedControl = GetReflectedMemberValue(source, fieldName) as Control;
+        var reflectedText = GetControlText(reflectedControl);
+        if (!string.IsNullOrWhiteSpace(reflectedText))
+        {
+            return reflectedText;
+        }
+
+        if (source is Control control)
+        {
+            var namedControl = EnumerateControls(control)
+                .FirstOrDefault(c => string.Equals(c.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+            return GetControlText(namedControl);
+        }
+
+        return "";
     }
 
     private Control? TryGetMissionControlByDisplayIndex(int displayIndex)

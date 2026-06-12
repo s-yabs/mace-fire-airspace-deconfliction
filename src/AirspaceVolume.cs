@@ -77,7 +77,7 @@ internal sealed class AirspaceVolume
 
         if (IsAimed)
         {
-            return preparingToFireColor;
+            return plannedAimedColor;
         }
 
         if (HasTargetListed)
