@@ -106,6 +106,12 @@ internal sealed class CallForFireMissionSnapshot
             return null;
         }
 
+        if (IsTimeToTargetMode(timingMode)
+            && double.TryParse(timeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return referenceMissionTime.AddSeconds(seconds);
+        }
+
         if (TimeSpan.TryParse(timeText, CultureInfo.InvariantCulture, out var timeOfDay)
             || TimeSpan.TryParse(timeText, out timeOfDay))
         {
@@ -120,6 +126,11 @@ internal sealed class CallForFireMissionSnapshot
         if (DateTime.TryParse(timeText, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsedDateTime)
             || DateTime.TryParse(timeText, out parsedDateTime))
         {
+            if (parsedDateTime.Year <= 1900)
+            {
+                return null;
+            }
+
             return parsedDateTime;
         }
 

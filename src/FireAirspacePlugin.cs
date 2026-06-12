@@ -176,9 +176,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         for (var i = 0; i < args.Missions.Count; i++)
         {
-            var displayIndex = _pendingAimDisplayIndex
+            int? displayIndexCandidate = args.Missions.Count == 1 ? _pendingAimDisplayIndex : null;
+            var displayIndex = displayIndexCandidate
+                ?? TryGetBackgroundMissionDisplayIndex(sender, args.Missions[i])
                 ?? TryGetUiMissionDisplayIndex(args.Missions[i])
-                ?? (args.Missions.Count > 1 ? i : -1);
+                ?? -1;
             var snapshot = CallForFireMissionSnapshot.FromMission(args.Missions[i], _mission?.Map, _mission?.MissionTime ?? DateTime.Now, displayIndex);
             if (snapshot.IsPlaceholder)
             {
@@ -190,8 +192,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
                 snapshot.ScheduledExecutionTime = TryGetUiScheduledExecutionTime(snapshot.DisplayIndex, _mission?.MissionTime ?? DateTime.Now);
             }
 
-            MergeMissionSnapshot(snapshot);
-            UpdateManualAimState(snapshot);
+            if (MergeMissionSnapshot(snapshot))
+            {
+                UpdateManualAimState(snapshot);
+            }
+
             _pendingAimDisplayIndex = null;
         }
 
@@ -420,7 +425,7 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         }
     }
 
-    private void MergeMissionSnapshot(CallForFireMissionSnapshot snapshot)
+    private bool MergeMissionSnapshot(CallForFireMissionSnapshot snapshot)
     {
         var key = GetMissionKey(snapshot);
         var existing = _missions.FirstOrDefault(m => GetMissionKey(m) == key)
@@ -431,11 +436,17 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             snapshot.ScheduledExecutionTime ??= existing.ScheduledExecutionTime;
             var index = _missions.IndexOf(existing);
             _missions[index] = snapshot;
-            return;
+            return true;
+        }
+
+        if (snapshot.DisplayIndex < 0 && snapshot.RequestId <= 0)
+        {
+            return false;
         }
 
         snapshot.DisplayIndex = AllocateDisplayIndex(snapshot);
         _missions.Add(snapshot);
+        return true;
     }
 
     private void UpdateManualAimState(CallForFireMissionSnapshot snapshot)
@@ -831,6 +842,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         _timerTicks++;
         HookCallForFireAimButtons();
         ClearIfMissionWasReset();
+        if (RefreshMissionSchedulesFromUi(_mission.MissionTime))
+        {
+            SynchronizeAimedOverlays();
+        }
+
         var now = _mission.MissionTime;
         _activeVolumes.RemoveAll(v => v.NotBefore <= now);
 
@@ -994,16 +1010,18 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         {
             foreach (var field in new[]
             {
-                new ScheduledTimeField("txtFirePlanStartTime", null),
-                new ScheduledTimeField("txtTimeOnTarget", "TimeOnTarget"),
-                new ScheduledTimeField("txtTimeToTarget", "TimeToTarget")
+                new ScheduledTimeField("txtFirePlanStartTime", null, new[] { "fire", "plan", "start" }),
+                new ScheduledTimeField("txtTimeOnTarget", "TimeOnTarget", new[] { "time", "on", "target" }),
+                new ScheduledTimeField("txtTimeToTarget", "TimeToTarget", new[] { "time", "to", "target" })
             })
             {
-                var text = GetNamedControlText(source, field.Name);
-                var parsed = CallForFireMissionSnapshot.ParseScheduledExecutionTime(text, missionTime, field.TimingMode);
-                if (parsed.HasValue)
+                foreach (var text in GetNamedControlTexts(source, field))
                 {
-                    return parsed.Value;
+                    var parsed = CallForFireMissionSnapshot.ParseScheduledExecutionTime(text, missionTime, field.TimingMode);
+                    if (parsed.HasValue)
+                    {
+                        return parsed.Value;
+                    }
                 }
             }
         }
@@ -1013,38 +1031,63 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
     private readonly struct ScheduledTimeField
     {
-        public ScheduledTimeField(string name, string? timingMode)
+        public ScheduledTimeField(string name, string? timingMode, string[] nameTokens)
         {
             Name = name;
             TimingMode = timingMode;
+            NameTokens = nameTokens;
         }
 
         public string Name { get; }
         public string? TimingMode { get; }
+        public string[] NameTokens { get; }
     }
 
-    private static string GetNamedControlText(object? source, string fieldName)
+    private bool RefreshMissionSchedulesFromUi(DateTime missionTime)
+    {
+        var changed = false;
+        foreach (var mission in _missions.Where(m => m.DisplayIndex >= 0 && !m.IsTerminal))
+        {
+            var scheduled = TryGetUiScheduledExecutionTime(mission.DisplayIndex, missionTime);
+            if (scheduled.HasValue && mission.ScheduledExecutionTime != scheduled.Value)
+            {
+                mission.ScheduledExecutionTime = scheduled.Value;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private static IEnumerable<string> GetNamedControlTexts(object? source, ScheduledTimeField field)
     {
         if (source == null)
         {
-            return "";
+            yield break;
         }
 
-        var reflectedControl = GetReflectedMemberValue(source, fieldName) as Control;
-        var reflectedText = GetControlText(reflectedControl);
+        var reflectedValue = GetReflectedMemberValue(source, field.Name);
+        var reflectedText = reflectedValue is Control reflectedControl
+            ? GetControlText(reflectedControl)
+            : reflectedValue?.ToString()?.Trim() ?? "";
         if (!string.IsNullOrWhiteSpace(reflectedText))
         {
-            return reflectedText;
+            yield return reflectedText;
         }
 
         if (source is Control control)
         {
-            var namedControl = EnumerateControls(control)
-                .FirstOrDefault(c => string.Equals(c.Name, fieldName, StringComparison.OrdinalIgnoreCase));
-            return GetControlText(namedControl);
+            foreach (var candidate in EnumerateControls(control)
+                .Where(c => string.Equals(c.Name, field.Name, StringComparison.OrdinalIgnoreCase)
+                    || ContainsAllTokens(c.Name, field.NameTokens)))
+            {
+                var text = GetControlText(candidate);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    yield return text;
+                }
+            }
         }
-
-        return "";
     }
 
     private Control? TryGetMissionControlByDisplayIndex(int displayIndex)
@@ -1145,6 +1188,16 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         var oneDecimal = expected.ToString("0.0");
         return text.IndexOf(rounded, StringComparison.OrdinalIgnoreCase) >= 0
             || text.IndexOf(oneDecimal, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool ContainsAllTokens(string value, IEnumerable<string> tokens)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return tokens.All(token => value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     private int GetCallForFireFormIndex(object? parentForm)
