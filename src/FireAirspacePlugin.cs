@@ -843,6 +843,11 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         _timerTicks++;
         HookCallForFireAimButtons();
         ClearIfMissionWasReset();
+        if (RefreshMissionDisplayIndexesFromUi())
+        {
+            SynchronizeAimedOverlays();
+        }
+
         if (RefreshMissionSchedulesFromUi(_mission.MissionTime))
         {
             SynchronizeAimedOverlays();
@@ -998,6 +1003,40 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         return bestScore >= 4 ? bestDisplayIndex : null;
     }
 
+    private int? TryGetUiMissionDisplayIndex(CallForFireMissionSnapshot mission)
+    {
+        var bestDisplayIndex = -1;
+        var bestScore = 0;
+
+        foreach (Form form in Application.OpenForms)
+        {
+            var formControls = EnumerateControls(form)
+                .Where(c => c.GetType().FullName == "RW_ACE.FormCallForFire_Control")
+                .ToList();
+
+            for (var i = 0; i < formControls.Count; i++)
+            {
+                var missionControl = formControls[i];
+                var parentForm = GetReflectedMemberValue(missionControl, "parentCFFForm");
+                var formIndex = GetCallForFireFormIndex(parentForm);
+                var missionIndex = GetMissionIndexWithinForm(missionControl, parentForm, i);
+                if (formIndex < 0 || missionIndex < 0)
+                {
+                    continue;
+                }
+
+                var score = ScoreMissionControl(missionControl, mission);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestDisplayIndex = (formIndex * 8) + Math.Min(missionIndex, 7);
+                }
+            }
+        }
+
+        return bestScore >= 4 ? bestDisplayIndex : null;
+    }
+
     private DateTime? TryGetUiScheduledExecutionTime(int displayIndex, DateTime missionTime)
     {
         var missionControl = TryGetMissionControlByDisplayIndex(displayIndex);
@@ -1053,6 +1092,37 @@ public sealed class MaceFireAirspace : IMACEPlugIn
             if (scheduled.HasValue && mission.ScheduledExecutionTime != scheduled.Value)
             {
                 mission.ScheduledExecutionTime = scheduled.Value;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private bool RefreshMissionDisplayIndexesFromUi()
+    {
+        if (_missions.Count == 0)
+        {
+            return false;
+        }
+
+        var changed = false;
+        foreach (var mission in _missions.ToList())
+        {
+            var displayIndex = TryGetUiMissionDisplayIndex(mission);
+            if (displayIndex.HasValue && displayIndex.Value != mission.DisplayIndex)
+            {
+                var oldKey = GetMissionSourceKey(mission);
+                mission.DisplayIndex = displayIndex.Value;
+                _manuallyAimedDisplayIndexes.RemoveWhere(i => i == displayIndex.Value || i < 0);
+                foreach (var volume in _activeVolumes.Where(v => v.SourceKey == oldKey).ToList())
+                {
+                    volume.SourceKey = GetMissionSourceKey(mission);
+                    volume.DisplayName = $"{mission.CffFormName} / {mission.MissionName}";
+                    volume.CffFormName = mission.CffFormName;
+                    volume.MissionName = mission.MissionName;
+                }
+
                 changed = true;
             }
         }
@@ -1149,6 +1219,33 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         return score;
     }
 
+    private static int ScoreMissionControl(Control missionControl, CallForFireMissionSnapshot mission)
+    {
+        var score = 0;
+        score += ScoreControlText(missionControl, "txtTargetLocation", mission.TargetLocationText, 4);
+        score += ScoreControlText(missionControl, "txtTargetNumber", mission.TargetNumber, 2);
+        score += ScoreControlText(missionControl, "ddlOrdnance", mission.Round, 2);
+
+        if (mission.NumberOfRounds > 0 && ScoreNumericControl(missionControl, "nudNumberOfRounds", mission.NumberOfRounds))
+        {
+            score += 1;
+        }
+
+        var maxOrdinateText = GetControlText(GetReflectedMemberValue(missionControl, "lbMaxOrdinate_m") as Control);
+        if (mission.MaxOrdinateMSL_m > 0 && TextContainsRoundedNumber(maxOrdinateText, mission.MaxOrdinateMSL_m))
+        {
+            score += 1;
+        }
+
+        var gtlText = GetControlText(GetReflectedMemberValue(missionControl, "lbHdgGunToTgt_deg") as Control);
+        if (mission.GunTargetLine_deg > 0 && TextContainsRoundedNumber(gtlText, mission.GunTargetLine_deg))
+        {
+            score += 1;
+        }
+
+        return score;
+    }
+
     private static int ScoreControlText(Control missionControl, string fieldName, string? expected, int points)
     {
         if (string.IsNullOrWhiteSpace(expected))
@@ -1158,7 +1255,21 @@ public sealed class MaceFireAirspace : IMACEPlugIn
 
         var control = GetReflectedMemberValue(missionControl, fieldName) as Control;
         var text = GetControlText(control);
-        return string.Equals(text, expected, StringComparison.OrdinalIgnoreCase) ? points : 0;
+        if (string.Equals(text, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            return points;
+        }
+
+        var normalizedText = NormalizeForMatch(text);
+        var normalizedExpected = NormalizeForMatch(expected ?? "");
+        if (normalizedText.Length == 0 || normalizedExpected.Length == 0)
+        {
+            return 0;
+        }
+
+        return normalizedText.Contains(normalizedExpected) || normalizedExpected.Contains(normalizedText)
+            ? Math.Max(1, points - 1)
+            : 0;
     }
 
     private static bool ScoreNumericControl(Control missionControl, string fieldName, int expected)
@@ -1189,6 +1300,14 @@ public sealed class MaceFireAirspace : IMACEPlugIn
         var oneDecimal = expected.ToString("0.0");
         return text.IndexOf(rounded, StringComparison.OrdinalIgnoreCase) >= 0
             || text.IndexOf(oneDecimal, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static string NormalizeForMatch(string value)
+    {
+        return new string((value ?? "")
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
     }
 
     private static bool ContainsAllTokens(string value, IEnumerable<string> tokens)
